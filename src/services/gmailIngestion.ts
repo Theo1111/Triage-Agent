@@ -1,0 +1,280 @@
+import { randomUUID } from "crypto";
+import { decodePubSubPayload } from "@/src/lib/pubsub/decode";
+import { createGmailClientForInbox } from "@/src/lib/google/gmail";
+import { parseHeaders, buildHeaderMap } from "@/src/lib/parsing/headers";
+import { extractEmailBodies } from "@/src/lib/parsing/emailBody";
+import { shouldIngestEmail } from "./filters";
+import { logError } from "./ingestionErrors";
+import { startRun, finishRun } from "./ingestionRuns";
+import { processAttachmentsForEmail } from "./attachmentIngestion";
+import { runAutoTriagePipeline } from "./autoTriagePipeline";
+import { env } from "@/src/config/env";
+import * as inboxesRepo from "@/src/repositories/monitoredInboxesRepository";
+import * as watchRepo from "@/src/repositories/gmailWatchStatesRepository";
+import * as pubsubRepo from "@/src/repositories/pubsubNotificationsRepository";
+import * as emailsRepo from "@/src/repositories/inboundEmailsRepository";
+import type { IngestionResult, ProcessHistoryInput, ProcessMessageInput, ProcessMessageResult } from "@/src/types/ingestion";
+
+export async function processPubSubNotification(body: unknown): Promise<IngestionResult> {
+  // Decode the Pub/Sub payload first so we can store it for debugging.
+  let decoded: ReturnType<typeof decodePubSubPayload>;
+  try {
+    decoded = decodePubSubPayload(body);
+  } catch (err) {
+    await logError({ stage: "pubsub_decode_failed", error: err });
+    return emptyResult("failed");
+  }
+
+  const { pubsubMessageId, emailAddress, historyId, rawPayload } = decoded;
+
+  // Store raw notification — dedupe by pubsubMessageId.
+  const { inserted, row: notification } = await pubsubRepo.insertIfNew({
+    pubsubMessageId,
+    emailAddress,
+    historyId,
+    rawPayload,
+  });
+
+  if (!inserted) {
+    console.log(`[pubsub] Duplicate notification ${pubsubMessageId} — skipping`);
+    await pubsubRepo.updateStatus(notification.id, "duplicate");
+    return emptyResult("success");
+  }
+
+  await pubsubRepo.updateStatus(notification.id, "processing");
+
+  // Find the monitored inbox.
+  const inbox = await inboxesRepo.findByEmail(emailAddress);
+  if (!inbox) {
+    const msg = `No active inbox found for ${emailAddress}`;
+    await logError({ stage: "history_fetch_failed", error: msg });
+    await pubsubRepo.updateStatus(notification.id, "failed", msg);
+    return emptyResult("failed");
+  }
+
+  // Start ingestion run.
+  const runId = randomUUID();
+  const run = await startRun({ runId, triggerType: "pubsub_push", triggerSource: pubsubMessageId });
+
+  await watchRepo.updateLastNotificationAt(inbox.id);
+
+  const counts: IngestionResult = {
+    runId,
+    messagesFound: 0,
+    newMessagesStored: 0,
+    duplicatesSkipped: 0,
+    externalMessagesSkipped: 0,
+    automatedAlertsSkipped: 0,
+    attachmentsFound: 0,
+    attachmentsStored: 0,
+    attachmentParseFailures: 0,
+    errors: 0,
+    status: "success",
+  };
+
+  try {
+    await processHistoryForInbox(
+      {
+        inboxId: inbox.id,
+        emailAddress: inbox.email_address,
+        incomingHistoryId: historyId,
+        ingestionRunId: run.id,
+        triggerType: "pubsub_push",
+      },
+      counts
+    );
+
+    counts.status = counts.errors > 0 ? (counts.newMessagesStored > 0 ? "partial_success" : "failed") : "success";
+  } catch (err) {
+    counts.errors++;
+    counts.status = "failed";
+    await logError({ ingestionRunId: run.id, monitoredInboxId: inbox.id, stage: "history_fetch_failed", error: err });
+  }
+
+  await finishRun(run, {
+    inboxesChecked: 1,
+    messagesFound: counts.messagesFound,
+    newMessagesStored: counts.newMessagesStored,
+    duplicatesSkipped: counts.duplicatesSkipped,
+    externalMessagesSkipped: counts.externalMessagesSkipped,
+    automatedAlertsSkipped: counts.automatedAlertsSkipped,
+    attachmentsFound: counts.attachmentsFound,
+    attachmentsStored: counts.attachmentsStored,
+    attachmentParseFailures: counts.attachmentParseFailures,
+    errors: counts.errors,
+  });
+
+  await pubsubRepo.updateStatus(notification.id, counts.status === "failed" ? "failed" : "processed");
+
+  return counts;
+}
+
+async function processHistoryForInbox(
+  input: ProcessHistoryInput,
+  counts: IngestionResult
+): Promise<void> {
+  const watchState = await watchRepo.findByInboxId(input.inboxId);
+  const startHistoryId = watchState?.last_processed_history_id ?? input.incomingHistoryId;
+
+  const gmail = await createGmailClientForInbox(input.inboxId);
+
+  // Collect all message IDs from history pages.
+  const messageIds: string[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const page = await gmail.listHistory(startHistoryId, pageToken);
+    pageToken = page.nextPageToken;
+
+    for (const item of page.history ?? []) {
+      for (const added of item.messagesAdded ?? []) {
+        if (added.message.id) messageIds.push(added.message.id);
+      }
+    }
+  } while (pageToken);
+
+  counts.messagesFound += messageIds.length;
+  console.log(`[history] inbox=${input.emailAddress} start=${startHistoryId} found=${messageIds.length} messages`);
+
+  // Process each message individually — one failure doesn't stop the rest.
+  for (const messageId of messageIds) {
+    try {
+      const result = await processMessage(
+        { inboxId: input.inboxId, emailAddress: input.emailAddress, messageId, ingestionRunId: input.ingestionRunId },
+        counts
+      );
+
+      if (result.stored) counts.newMessagesStored++;
+      else if (result.skipReason === "duplicate") counts.duplicatesSkipped++;
+
+      if (result.stored && result.inboundEmailId && env.AUTO_TRIAGE_NEW_EMAILS === "true") {
+        try {
+          await runAutoTriagePipeline(result.inboundEmailId);
+        } catch (err) {
+          console.error(`[ingestion] auto-triage uncaught error for email=${result.inboundEmailId}:`, err);
+        }
+      }
+      else if (result.skipReason === "internal") counts.externalMessagesSkipped++;
+      else if (result.skipReason === "automated_alert") counts.automatedAlertsSkipped++;
+    } catch (err) {
+      counts.errors++;
+      await logError({
+        ingestionRunId: input.ingestionRunId,
+        monitoredInboxId: input.inboxId,
+        gmailMessageId: messageId,
+        stage: "message_fetch_failed",
+        error: err,
+      });
+    }
+  }
+
+  // Only advance the history pointer after successful processing.
+  await watchRepo.updateLastProcessedHistoryId(input.inboxId, input.incomingHistoryId);
+}
+
+async function processMessage(
+  input: ProcessMessageInput,
+  counts: IngestionResult
+): Promise<ProcessMessageResult> {
+  const gmail = await createGmailClientForInbox(input.inboxId);
+  const message = await gmail.getMessage(input.messageId);
+
+  if (!message.payload) {
+    throw new Error(`Gmail message ${input.messageId} has no payload`);
+  }
+
+  const rawHeaders = message.payload.headers ?? [];
+  const headerMap = buildHeaderMap(rawHeaders);
+  const headers = parseHeaders(rawHeaders);
+  const labelIds = message.labelIds ?? [];
+
+  // Apply ingestion filters.
+  const filterResult = shouldIngestEmail({
+    senderEmail: headers.senderEmail,
+    labelIds,
+    headers: headerMap,
+  });
+
+  if (!filterResult.shouldIngest) {
+    console.log(
+      `[message] skip messageId=${input.messageId} reason=${filterResult.skipReason} sender=${headers.senderEmail}`
+    );
+    return { stored: false, skipped: true, skipReason: filterResult.skipReason };
+  }
+
+  const { textPlain, textHtml } = extractEmailBodies(message.payload);
+
+  const gmailLink = `https://mail.google.com/mail/u/0/#inbox/${input.messageId}`;
+  const internalDate = message.internalDate
+    ? new Date(Number(message.internalDate)).toISOString()
+    : null;
+
+  const { inserted, row: emailRow } = await emailsRepo.insertIfNew({
+    monitoredInboxId: input.inboxId,
+    sourceInboxEmail: input.emailAddress,
+    gmailMessageId: message.id,
+    gmailThreadId: message.threadId ?? null,
+    gmailHistoryId: message.historyId ?? null,
+    gmailInternalDate: internalDate,
+    gmailLink,
+    labelIds,
+    senderEmail: headers.senderEmail,
+    senderName: headers.senderName,
+    recipientEmails: headers.to,
+    ccEmails: headers.cc,
+    bccEmails: headers.bcc,
+    replyTo: headers.replyTo,
+    subject: headers.subject,
+    snippet: message.snippet ?? null,
+    bodyText: textPlain,
+    bodyHtml: textHtml,
+    headersJson: headerMap,
+    payloadJson: message.payload as Record<string, unknown>,
+    sizeEstimate: message.sizeEstimate ?? null,
+    receivedAt: headers.receivedAt,
+    sentAt: headers.sentAt,
+    isExternal: filterResult.isExternal,
+    isAutomatedAlert: filterResult.isAutomatedAlert,
+    hasAttachments: false, // updated below
+    attachmentCount: 0,
+  });
+
+  if (!inserted) {
+    return { stored: false, skipped: true, skipReason: "duplicate" };
+  }
+
+  console.log(`[message] stored messageId=${input.messageId} subject="${headers.subject}"`);
+
+  // Process attachments for the stored email.
+  const attachmentResult = await processAttachmentsForEmail(
+    {
+      inboundEmailId: emailRow.id,
+      emailAddress: input.emailAddress,
+      messageId: input.messageId,
+      ingestionRunId: input.ingestionRunId,
+    },
+    message.payload
+  );
+
+  counts.attachmentsFound += attachmentResult.found;
+  counts.attachmentsStored += attachmentResult.stored;
+  counts.attachmentParseFailures += attachmentResult.parseFailures;
+
+  return { stored: true, skipped: false, inboundEmailId: emailRow.id };
+}
+
+function emptyResult(status: IngestionResult["status"]): IngestionResult {
+  return {
+    runId: "",
+    messagesFound: 0,
+    newMessagesStored: 0,
+    duplicatesSkipped: 0,
+    externalMessagesSkipped: 0,
+    automatedAlertsSkipped: 0,
+    attachmentsFound: 0,
+    attachmentsStored: 0,
+    attachmentParseFailures: 0,
+    errors: status === "failed" ? 1 : 0,
+    status,
+  };
+}
