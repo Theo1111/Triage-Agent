@@ -1,93 +1,151 @@
-import type { ReactNode } from "react";
+import { Suspense } from "react";
 import { query } from "@/src/lib/db";
-import type { TriageItem } from "@/src/types/database";
-import type { SerializedTriageItem } from "./types";
+import type { TriageItem, EmailClassification } from "@/src/types/database";
+import type { SerializedTriageItem, TabCounts } from "./types";
 import TriageTable from "./TriageTable";
+import FilterBar from "./FilterBar";
 import styles from "./dashboard.module.css";
+import { TEAM_CATEGORIES } from "@/src/config/roles";
 
-// Always fetch fresh — this is a live triage queue.
 export const dynamic = "force-dynamic";
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type ExtendedRow = TriageItem & {
+  primary_category: string | null;
+  urgency_reason: string | null;
+};
+
 // ── Serialization ─────────────────────────────────────────────────────────────
-// pg returns Date objects; Next.js can't serialize them across the server →
-// client boundary, so we convert to ISO strings before passing as props.
 
 function toISO(d: Date | null | undefined): string | null {
   if (!d) return null;
   return d instanceof Date ? d.toISOString() : String(d);
 }
 
-function serialize(item: TriageItem): SerializedTriageItem {
+function serialize(row: ExtendedRow): SerializedTriageItem {
   return {
-    id: item.id,
-    inbound_email_id: item.inbound_email_id,
-    classification_id: item.classification_id,
-    source_inbox_email: item.source_inbox_email,
-    sender_email: item.sender_email,
-    sender_name: item.sender_name,
-    subject: item.subject,
-    summary: item.summary,
-    urgency_level: item.urgency_level,
-    sensitivity_level: item.sensitivity_level,
-    route_type: item.route_type,
-    owner: item.owner,
-    status: item.status,
-    recommended_next_step: item.recommended_next_step,
-    slack_channel: item.slack_channel,
-    created_at: (item.created_at instanceof Date ? item.created_at.toISOString() : String(item.created_at)),
-    updated_at: (item.updated_at instanceof Date ? item.updated_at.toISOString() : String(item.updated_at)),
-    assigned_at: toISO(item.assigned_at),
-    resolved_at: toISO(item.resolved_at),
-    escalated_at: toISO(item.escalated_at),
+    id: row.id,
+    inbound_email_id: row.inbound_email_id,
+    classification_id: row.classification_id,
+    source_inbox_email: row.source_inbox_email,
+    sender_email: row.sender_email,
+    sender_name: row.sender_name,
+    subject: row.subject,
+    summary: row.summary,
+    urgency_level: row.urgency_level,
+    sensitivity_level: row.sensitivity_level,
+    route_type: row.route_type,
+    owner: row.owner,
+    status: row.status,
+    recommended_next_step: row.recommended_next_step,
+    slack_channel: row.slack_channel,
+    slack_message_ts: row.slack_message_ts,
+    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
+    assigned_at: toISO(row.assigned_at),
+    resolved_at: toISO(row.resolved_at),
+    escalated_at: toISO(row.escalated_at),
+    archived_at: toISO(row.archived_at),
+    archived_by: row.archived_by,
+    primary_category: row.primary_category,
+    urgency_reason: row.urgency_reason,
   };
 }
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
-async function fetchDashboardData(): Promise<{
-  open: SerializedTriageItem[];
-  resolvedToday: SerializedTriageItem[];
-}> {
-  const [openRows, resolvedRows] = await Promise.all([
-    // All non-terminal items, urgent-first
-    query<TriageItem>(
-      `SELECT * FROM triage_items
-       WHERE status NOT IN ('resolved', 'ignored')
-       ORDER BY
-         CASE urgency_level WHEN 'urgent' THEN 0 ELSE 1 END,
-         created_at DESC`
-    ),
-    // Resolved in the current calendar day (UTC)
-    query<TriageItem>(
-      `SELECT * FROM triage_items
-       WHERE status = 'resolved'
-         AND resolved_at >= CURRENT_DATE
-       ORDER BY resolved_at DESC
-       LIMIT 50`
-    ),
-  ]);
+async function fetchTabCounts(): Promise<TabCounts> {
+  const [row] = await query<Record<string, string>>(
+    `SELECT
+       COUNT(*) FILTER (WHERE ti.status NOT IN ('resolved','archived','ignored'))                                                          AS "all",
+       COUNT(*) FILTER (WHERE ti.urgency_level='urgent' AND ti.status NOT IN ('resolved','archived','ignored'))                           AS urgent_open,
+       COUNT(*) FILTER (WHERE ti.status IN ('assigned','escalated'))                                                                      AS assigned,
+       COUNT(*) FILTER (WHERE ti.status = 'manual_review')                                                                               AS manual_review,
+       COUNT(*) FILTER (WHERE ti.status = 'resolved')                                                                                    AS resolved,
+       COUNT(*) FILTER (WHERE ti.status = 'archived')                                                                                    AS archived,
+       COUNT(*) FILTER (WHERE ec.primary_category = ANY($1::text[]) AND ti.status NOT IN ('resolved','archived','ignored'))              AS operations,
+       COUNT(*) FILTER (WHERE ec.primary_category = ANY($2::text[]) AND ti.status NOT IN ('resolved','archived','ignored'))              AS engineering,
+       COUNT(*) FILTER (WHERE ec.primary_category = ANY($3::text[]) AND ti.status NOT IN ('resolved','archived','ignored'))              AS customer_success,
+       COUNT(*) FILTER (WHERE ec.primary_category = ANY($4::text[]) AND ti.status NOT IN ('resolved','archived','ignored'))              AS field_ops
+     FROM triage_items ti
+     LEFT JOIN email_classifications ec ON ec.id = ti.classification_id`,
+    [
+      TEAM_CATEGORIES.operations,
+      TEAM_CATEGORIES.engineering,
+      TEAM_CATEGORIES.customer_success,
+      TEAM_CATEGORIES.field_ops,
+    ]
+  );
 
   return {
-    open: openRows.map(serialize),
-    resolvedToday: resolvedRows.map(serialize),
+    all: Number(row?.all ?? 0),
+    urgent_open: Number(row?.urgent_open ?? 0),
+    assigned: Number(row?.assigned ?? 0),
+    manual_review: Number(row?.manual_review ?? 0),
+    resolved: Number(row?.resolved ?? 0),
+    archived: Number(row?.archived ?? 0),
+    operations: Number(row?.operations ?? 0),
+    engineering: Number(row?.engineering ?? 0),
+    customer_success: Number(row?.customer_success ?? 0),
+    field_ops: Number(row?.field_ops ?? 0),
   };
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+async function fetchItems(team: string, search: string): Promise<SerializedTriageItem[]> {
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
 
-function ageMs(iso: string): number {
-  return Date.now() - new Date(iso).getTime();
+  if (team === "archived") {
+    conditions.push(`ti.status = 'archived'`);
+  } else if (team === "resolved") {
+    conditions.push(`ti.status = 'resolved'`);
+  } else if (team === "manual_review") {
+    conditions.push(`ti.status = 'manual_review'`);
+  } else if (team === "urgent_open") {
+    conditions.push(`ti.urgency_level = 'urgent'`);
+    conditions.push(`ti.status NOT IN ('resolved', 'archived', 'ignored')`);
+  } else if (team === "assigned") {
+    conditions.push(`ti.status IN ('assigned', 'escalated')`);
+  } else if (TEAM_CATEGORIES[team]) {
+    conditions.push(`ec.primary_category = ANY($${idx++}::text[])`);
+    values.push(TEAM_CATEGORIES[team]);
+    conditions.push(`ti.status NOT IN ('resolved', 'archived', 'ignored')`);
+  } else {
+    // Default "all": open items only
+    conditions.push(`ti.status NOT IN ('resolved', 'archived', 'ignored')`);
+  }
+
+  if (search.trim()) {
+    const pattern = `%${search.trim()}%`;
+    conditions.push(
+      `(ti.subject ILIKE $${idx} OR ti.sender_email ILIKE $${idx} OR ti.sender_name ILIKE $${idx} OR ti.summary ILIKE $${idx})`
+    );
+    values.push(pattern);
+    idx++;
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const rows = await query<ExtendedRow>(
+    `SELECT ti.*,
+            ec.primary_category,
+            ec.urgency_reason
+     FROM triage_items ti
+     LEFT JOIN email_classifications ec ON ec.id = ti.classification_id
+     ${whereClause}
+     ORDER BY
+       CASE ti.urgency_level WHEN 'urgent' THEN 0 ELSE 1 END,
+       ti.created_at DESC
+     LIMIT 300`,
+    values
+  );
+
+  return rows.map(serialize);
 }
 
-function formatAge(ms: number): string {
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(ms / 3_600_000);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(ms / 86_400_000)}d`;
-}
-
-// ── Sub-components (server-only, no interactivity) ────────────────────────────
+// ── Stat card ─────────────────────────────────────────────────────────────────
 
 function StatCard({
   label,
@@ -111,59 +169,45 @@ function StatCard({
   );
 }
 
-function Section({
-  title,
-  urgentBadge,
-  count,
-  children,
-}: {
-  title: string;
-  urgentBadge?: boolean;
-  count: number;
-  children: ReactNode;
-}) {
-  return (
-    <section className={styles.section}>
-      <h2 className={styles.sectionTitle}>
-        {urgentBadge && (
-          <span className={`${styles.badge} ${styles.badgeUrgent}`}>urgent</span>
-        )}
-        {title}
-        <span className={styles.sectionCount}>{count}</span>
-      </h2>
-      {children}
-    </section>
-  );
+function formatAge(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(ms / 86_400_000)}d`;
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default async function DashboardPage() {
-  let open: SerializedTriageItem[] = [];
-  let resolvedToday: SerializedTriageItem[] = [];
+interface PageProps {
+  searchParams: Promise<Record<string, string>>;
+}
+
+export default async function DashboardPage({ searchParams }: PageProps) {
+  const params = await searchParams;
+  const team = params.team ?? "all";
+  const search = params.search ?? "";
+
+  let items: SerializedTriageItem[] = [];
+  let counts: TabCounts = {
+    all: 0, urgent_open: 0, assigned: 0, manual_review: 0,
+    operations: 0, engineering: 0, customer_success: 0, field_ops: 0,
+    resolved: 0, archived: 0,
+  };
   let dbError: string | null = null;
 
   try {
-    const data = await fetchDashboardData();
-    open = data.open;
-    resolvedToday = data.resolvedToday;
+    [items, counts] = await Promise.all([
+      fetchItems(team, search),
+      fetchTabCounts(),
+    ]);
   } catch (err) {
     dbError = err instanceof Error ? err.message : "Unknown database error";
   }
 
-  // Section groupings
-  const urgentOpen       = open.filter(i => i.urgency_level === "urgent" && i.status === "new");
-  const assignedEscalated = open.filter(i => i.status === "assigned" || i.status === "escalated");
-  const manualReview     = open.filter(i => i.status === "manual_review");
-  const allNew           = open.filter(i => i.status === "new");
-
-  // Oldest unresolved (any new item)
-  const oldestNew = allNew.length > 0
-    ? allNew.reduce((a, b) =>
-        new Date(a.created_at) < new Date(b.created_at) ? a : b
-      )
-    : null;
-  const oldestMs = oldestNew ? ageMs(oldestNew.created_at) : 0;
+  const oldestOpenMs = items.length > 0
+    ? Math.max(...items.filter(i => i.status === "new").map(i => Date.now() - new Date(i.created_at).getTime()))
+    : 0;
 
   return (
     <div className={styles.container}>
@@ -171,9 +215,7 @@ export default async function DashboardPage() {
       <header className={styles.header}>
         <div>
           <h1 className={styles.title}>Triage Dashboard</h1>
-          <p className={styles.subtitle}>
-            Week 1 Ops Intelligence — Customer Success Escalation
-          </p>
+          <p className={styles.subtitle}>Grata / Speer Operations Intelligence</p>
         </div>
         <a href="/dashboard" className={styles.refreshBtn}>↻ Refresh</a>
       </header>
@@ -186,64 +228,32 @@ export default async function DashboardPage() {
 
       {/* Stats */}
       <div className={styles.statsGrid}>
-        <StatCard label="Total Open" value={open.length} />
+        <StatCard label="Total Open" value={counts.all} />
         <StatCard
           label="Urgent Open"
-          value={urgentOpen.length}
-          alert={urgentOpen.length > 0}
+          value={counts.urgent_open}
+          alert={counts.urgent_open > 0}
         />
         <StatCard
           label="Manual Review"
-          value={manualReview.length}
-          alert={manualReview.length > 0}
+          value={counts.manual_review}
+          alert={counts.manual_review > 0}
         />
-        <StatCard
-          label="Resolved Today"
-          value={resolvedToday.length}
-          positive
-        />
+        <StatCard label="Resolved" value={counts.resolved} positive />
         <StatCard
           label="Oldest Unresolved"
-          value={oldestNew ? formatAge(oldestMs) : "—"}
-          alert={oldestMs > 86_400_000}
+          value={oldestOpenMs > 0 ? formatAge(oldestOpenMs) : "—"}
+          alert={oldestOpenMs > 86_400_000}
         />
       </div>
 
-      {/* Section 1: Urgent open (status=new, urgency=urgent) */}
-      <Section title="Urgent Open Items" urgentBadge count={urgentOpen.length}>
-        {urgentOpen.length === 0 ? (
-          <p className={styles.empty}>No urgent open items — all clear.</p>
-        ) : (
-          <TriageTable items={urgentOpen} />
-        )}
-      </Section>
-
-      {/* Section 2: Assigned + escalated */}
-      <Section title="Assigned / Escalated" count={assignedEscalated.length}>
-        {assignedEscalated.length === 0 ? (
-          <p className={styles.empty}>No items currently assigned or escalated.</p>
-        ) : (
-          <TriageTable items={assignedEscalated} />
-        )}
-      </Section>
-
-      {/* Section 3: Manual review */}
-      <Section title="Manual Review" count={manualReview.length}>
-        {manualReview.length === 0 ? (
-          <p className={styles.empty}>No items awaiting manual review.</p>
-        ) : (
-          <TriageTable items={manualReview} />
-        )}
-      </Section>
-
-      {/* Section 4: Resolved today */}
-      <Section title="Resolved Today" count={resolvedToday.length}>
-        {resolvedToday.length === 0 ? (
-          <p className={styles.empty}>Nothing resolved today yet.</p>
-        ) : (
-          <TriageTable items={resolvedToday} showResolved />
-        )}
-      </Section>
+      {/* Filter bar + queue */}
+      <section className={styles.section}>
+        <Suspense fallback={<div className={styles.empty}>Loading filters…</div>}>
+          <FilterBar counts={counts} activeTeam={team} search={search} />
+        </Suspense>
+        <TriageTable items={items} />
+      </section>
     </div>
   );
 }

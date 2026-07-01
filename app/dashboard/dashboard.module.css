@@ -281,3 +281,278 @@
 .btnResolve:hover:not(:disabled)  { background: #d1fae5; }
 
 .actionError { font-size: 11px; color: #dc2626; margin-top: 4px; }
+
+.btnReopen  { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+.btnReopen:hover:not(:disabled)  { background: #fef9c3; }
+.btnArchive { background: #f3f4f6; color: #6b7280; border-color: #d1d5db; }
+.btnArchive:hover:not(:disabled) { background: #e5e7eb; }
+
+/* Status badge — archived */
+.statusArchived { background: #f3f4f6; color: #6b7280; border-color: #d1d5db; }
+
+/* Category badge */
+.badgeCategory { background: #f0fdf4; color: #166534; border-color: #bbf7d0; text-transform: none; font-size: 11px; }
+
+/* Row selected highlight */
+.rowSelected { background: #eff6ff !important; }
+
+/* Category cell */
+.categoryCell { min-width: 140px; }
+
+/* ── Filter bar ──────────────────────────────────────────────────────────────── */
+.filterBar {
+  margin-bottom: 18px;
+}
+.filterChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.filterChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 13px;
+  border-radius: 20px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, border-color 0.1s;
+}
+.filterChip:hover { background: #f3f4f6; border-color: #d1d5db; }
+.filterChipActive {
+  background: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+  color: #fff !important;
+}
+.filterCount {
+  background: rgba(0,0,0,0.15);
+  border-radius: 10px;
+  font-size: 11px;
+  padding: 1px 6px;
+  font-weight: 700;
+  min-width: 18px;
+  text-align: center;
+}
+.filterChipActive .filterCount { background: rgba(255,255,255,0.3); }
+
+.searchRow { display: flex; gap: 10px; }
+.searchInput {
+  flex: 1;
+  max-width: 420px;
+  padding: 7px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 7px;
+  font-size: 13px;
+  color: #111827;
+  background: #fff;
+  outline: none;
+}
+.searchInput:focus { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
+
+/* ── Detail Drawer ───────────────────────────────────────────────────────────── */
+.drawerOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.25);
+  z-index: 200;
+}
+.drawerPanel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 420px;
+  max-width: 100vw;
+  background: #fff;
+  box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+  z-index: 201;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  animation: slideIn 0.2s ease;
+}
+@keyframes slideIn {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+.drawerHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #e5e7eb;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+.drawerTitle {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  line-height: 1.4;
+}
+.drawerClose {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.drawerClose:hover { background: #f3f4f6; color: #111827; }
+
+.drawerError {
+  margin: 10px 20px 0;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #991b1b;
+}
+
+.drawerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 14px 20px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.drawerBtn {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 13px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  color: #374151;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.drawerBtn:hover { background: #f3f4f6; }
+.drawerBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.drawerBtnPrimary { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.drawerBtnPrimary:hover { background: #dbeafe; }
+.drawerBtnDanger { background: #fef2f2; color: #dc2626; border-color: #fca5a5; }
+.drawerBtnDanger:hover { background: #fee2e2; }
+.drawerBtnLink { background: #fff; color: #2563eb; border-color: #bfdbfe; }
+.drawerBtnLink:hover { background: #eff6ff; }
+
+.drawerSection {
+  padding: 14px 20px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.drawerSectionTitle {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  margin-bottom: 10px;
+}
+.drawerField {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 7px;
+  align-items: flex-start;
+  font-size: 13px;
+}
+.drawerLabel {
+  flex-shrink: 0;
+  width: 90px;
+  color: #6b7280;
+  font-size: 12px;
+  padding-top: 1px;
+}
+.drawerValue {
+  flex: 1;
+  color: #111827;
+  line-height: 1.45;
+}
+.drawerMuted { color: #9ca3af; font-style: italic; }
+.drawerEditable {
+  cursor: pointer;
+  border-bottom: 1px dashed #d1d5db;
+  padding-bottom: 1px;
+}
+.drawerEditable:hover { border-color: #2563eb; color: #2563eb; }
+
+.drawerEditGroup { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.drawerInput {
+  padding: 5px 9px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  font-size: 13px;
+  color: #111827;
+  outline: none;
+}
+.drawerInput:focus { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
+.drawerTextarea {
+  padding: 6px 9px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  font-size: 13px;
+  color: #111827;
+  resize: vertical;
+  outline: none;
+  font-family: inherit;
+}
+.drawerTextarea:focus { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
+.drawerEditActions { display: flex; gap: 6px; }
+.drawerBtnSm {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+}
+.drawerBtnSm:hover { background: #dbeafe; }
+.drawerBtnSm:disabled { opacity: 0.4; cursor: not-allowed; }
+.drawerBtnSmCancel {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #6b7280;
+  cursor: pointer;
+}
+.drawerBtnSmCancel:hover { background: #f3f4f6; }
+
+/* ── Operator bar ─────────────────────────────────────────────────────────── */
+.operatorBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 12px;
+  font-size: 12px;
+}
+.operatorLabel { color: #6b7280; }
+.operatorBtn {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 5px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.operatorBtn:hover { background: #dbeafe; }

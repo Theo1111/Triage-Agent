@@ -155,6 +155,33 @@ export async function reopenTriageItem(triageItemId: string): Promise<TriageItem
   return updated;
 }
 
+export async function archiveTriageItem(
+  triageItemId: string,
+  archivedBy: string
+): Promise<TriageItem> {
+  const item = await triageRepo.findById(triageItemId);
+  if (!item) throw new Error(`Triage item not found: ${triageItemId}`);
+  if (item.status === "archived") {
+    throw new Error(`Triage item already archived: ${triageItemId}`);
+  }
+
+  const updated = await triageRepo.archiveItem(triageItemId, archivedBy);
+  console.log(`[triage] archived item=${triageItemId} by=${archivedBy}`);
+  return updated;
+}
+
+export async function updateTriageFields(
+  triageItemId: string,
+  fields: { owner?: string | null; summary?: string | null; recommendedNextStep?: string | null }
+): Promise<TriageItem> {
+  const item = await triageRepo.findById(triageItemId);
+  if (!item) throw new Error(`Triage item not found: ${triageItemId}`);
+
+  const updated = await triageRepo.updateFields(triageItemId, fields);
+  console.log(`[triage] updated fields for item=${triageItemId}`);
+  return updated;
+}
+
 export async function escalateTriageItem(triageItemId: string): Promise<TriageItem> {
   const item = await triageRepo.findById(triageItemId);
   if (!item) throw new Error(`Triage item not found: ${triageItemId}`);

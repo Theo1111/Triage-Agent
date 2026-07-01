@@ -269,7 +269,8 @@ export type TriageStatus =
   | "escalated"
   | "resolved"
   | "ignored"
-  | "manual_review";
+  | "manual_review"
+  | "archived";
 
 export interface TriageItem {
   id: string;
@@ -294,6 +295,8 @@ export interface TriageItem {
   assigned_at: Date | null;
   resolved_at: Date | null;
   escalated_at: Date | null;
+  archived_at: Date | null;
+  archived_by: string | null;
 }
 
 export type ErrorStage =

@@ -4,10 +4,6 @@ import { assignTriageItem } from "@/src/services/triageItems";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  if (process.env.NODE_ENV === "production") {
-    return NextResponse.json({ error: "Not available in production" }, { status: 403 });
-  }
-
   let body: unknown;
   try {
     body = await req.json();

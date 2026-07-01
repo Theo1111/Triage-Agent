@@ -126,6 +126,52 @@ export async function reopenItem(id: string): Promise<TriageItem> {
   return row;
 }
 
+// Archive: sets status to "archived" and records who/when.
+export async function archiveItem(id: string, archivedBy: string): Promise<TriageItem> {
+  const row = await queryOne<TriageItem>(
+    `UPDATE triage_items
+     SET status      = 'archived',
+         archived_at = now(),
+         archived_by = $2,
+         updated_at  = now()
+     WHERE id = $1
+     RETURNING *`,
+    [id, archivedBy]
+  );
+  if (!row) throw new Error(`Triage item not found: ${id}`);
+  return row;
+}
+
+// Patch a subset of mutable triage fields. Only non-null values in the input are updated.
+export async function updateFields(
+  id: string,
+  fields: { owner?: string | null; summary?: string | null; recommendedNextStep?: string | null }
+): Promise<TriageItem> {
+  const setClauses: string[] = ["updated_at = now()"];
+  const values: unknown[] = [id];
+  let idx = 2;
+
+  if ("owner" in fields) {
+    setClauses.push(`owner = $${idx++}`);
+    values.push(fields.owner ?? null);
+  }
+  if ("summary" in fields) {
+    setClauses.push(`summary = $${idx++}`);
+    values.push(fields.summary ?? null);
+  }
+  if ("recommendedNextStep" in fields) {
+    setClauses.push(`recommended_next_step = $${idx++}`);
+    values.push(fields.recommendedNextStep ?? null);
+  }
+
+  const row = await queryOne<TriageItem>(
+    `UPDATE triage_items SET ${setClauses.join(", ")} WHERE id = $1 RETURNING *`,
+    values
+  );
+  if (!row) throw new Error(`Triage item not found: ${id}`);
+  return row;
+}
+
 // Used for resolve/escalate: sets status and the corresponding timestamp.
 export async function updateStatus(
   id: string,

@@ -4,10 +4,6 @@ import { findByInboundEmailId } from "@/src/services/triageItems";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  if (process.env.NODE_ENV === "production") {
-    return NextResponse.json({ error: "Not available in production" }, { status: 403 });
-  }
-
   const inboundEmailId = req.nextUrl.searchParams.get("inboundEmailId");
   if (!inboundEmailId?.trim()) {
     return NextResponse.json(

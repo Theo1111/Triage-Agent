@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { queryOne } from "@/src/lib/db";
-import { formatCategoryLabel } from "@/src/services/slackAlerts";
+import { formatCategoryLabel } from "@/src/lib/formatCategory";
 import type { EmailClassification, TriageItem } from "@/src/types/database";
 
 export const dynamic = "force-dynamic";
