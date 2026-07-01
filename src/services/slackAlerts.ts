@@ -143,53 +143,53 @@ export function buildSlackEscalationMessage(
   const fallbackText = `🚨 Urgent: ${subject} — from ${senderDisplay}. ${summary}`;
 
   const appBaseUrl = process.env.APP_BASE_URL?.replace(/\/$/, "");
-  const viewEmailUrl = appBaseUrl ? `${appBaseUrl}/dashboard` : null;
+  const viewEmailUrl = appBaseUrl ? `${appBaseUrl}/emails/${e.id}` : null;
 
   const blocks: unknown[] = [
     {
       type: "header",
       text: { type: "plain_text", text: "🚨 Urgent Email Alert", emoji: true },
     },
-    // Top metadata: subject, category, owner at a glance
+    // Two-column metadata
     {
       type: "section",
-      text: {
-        type: "mrkdwn",
-        text:
-          `*Subject:* ${subject}\n` +
-          `*Category:* ${category}\n` +
-          `*Owner:* Unassigned`,
-      },
+      fields: [
+        { type: "mrkdwn", text: `*From:*\n${senderDisplay}` },
+        { type: "mrkdwn", text: `*To:*\n${e.source_inbox_email}` },
+        { type: "mrkdwn", text: `*Subject:*\n${subject}` },
+        { type: "mrkdwn", text: `*Category:*\n${category}` },
+        { type: "mrkdwn", text: `*Owner:*\nUnassigned` },
+      ],
     },
-    // Triage status block
+    { type: "divider" },
     {
       type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `🚦 *Triage status*\n*Status:* New\n*Last action:* Alert received`,
-      },
+      text: { type: "mrkdwn", text: `*Summary:*\n${summary}` },
+    },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: `🆕 *Status:* New` },
     },
   ];
 
-  // Action buttons — prominent, before email details
   if (triageItemId) {
     const elements: unknown[] = [
       {
         type: "button",
-        text: { type: "plain_text", text: "Assign to me", emoji: false },
+        text: { type: "plain_text", text: "✅ Assign to me", emoji: true },
         action_id: "triage_assign_to_me",
         value: triageItemId,
         style: "primary",
       },
       {
         type: "button",
-        text: { type: "plain_text", text: "Route / Notify", emoji: false },
+        text: { type: "plain_text", text: "📤 Route / Notify", emoji: true },
         action_id: "triage_route_open_modal",
         value: triageItemId,
       },
       {
         type: "button",
-        text: { type: "plain_text", text: "Resolved", emoji: false },
+        text: { type: "plain_text", text: "🟢 Mark Resolved", emoji: true },
         action_id: "triage_resolve",
         value: triageItemId,
       },
@@ -197,26 +197,12 @@ export function buildSlackEscalationMessage(
     if (viewEmailUrl) {
       elements.push({
         type: "button",
-        text: { type: "plain_text", text: "View Email", emoji: false },
+        text: { type: "plain_text", text: "📬 View Email", emoji: true },
         url: viewEmailUrl,
       });
     }
     blocks.push({ type: "actions", elements });
   }
-
-  // Email details
-  blocks.push({ type: "divider" });
-  blocks.push({
-    type: "section",
-    fields: [
-      { type: "mrkdwn", text: `*From:*\n${senderDisplay}` },
-      { type: "mrkdwn", text: `*To:*\n${e.source_inbox_email}` },
-    ],
-  });
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: `*Summary:*\n${summary}` },
-  });
 
   return { text: fallbackText, blocks };
 }
@@ -246,12 +232,12 @@ export function buildSlackUpdateBlocks(
   const fallbackText = `${opts.statusText.replace(/\*/g, "")} — ${subject} from ${senderDisplay}`;
 
   const appBaseUrl = process.env.APP_BASE_URL?.replace(/\/$/, "");
-  const viewEmailUrl = appBaseUrl ? `${appBaseUrl}/dashboard` : null;
+  const viewEmailUrl = appBaseUrl ? `${appBaseUrl}/emails/${item.inbound_email_id}` : null;
 
   const viewEmailButton = viewEmailUrl
     ? {
         type: "button",
-        text: { type: "plain_text", text: "View Email", emoji: false },
+        text: { type: "plain_text", text: "📬 View Email", emoji: true },
         url: viewEmailUrl,
       }
     : null;
@@ -261,21 +247,26 @@ export function buildSlackUpdateBlocks(
       type: "header",
       text: { type: "plain_text", text: "🚨 Urgent Email Alert", emoji: true },
     },
-    // Top metadata: subject, category, owner at a glance
+    // Two-column metadata
     {
       type: "section",
-      text: {
-        type: "mrkdwn",
-        text:
-          `*Subject:* ${subject}\n` +
-          `*Category:* ${category}\n` +
-          `*Owner:* ${owner}`,
-      },
+      fields: [
+        { type: "mrkdwn", text: `*From:*\n${senderDisplay}` },
+        { type: "mrkdwn", text: `*To:*\n${item.source_inbox_email}` },
+        { type: "mrkdwn", text: `*Subject:*\n${subject}` },
+        { type: "mrkdwn", text: `*Category:*\n${category}` },
+        { type: "mrkdwn", text: `*Owner:*\n${owner}` },
+      ],
     },
-    // Triage status block — Status / Last action (populated by statusText from action handler)
+    { type: "divider" },
     {
       type: "section",
-      text: { type: "mrkdwn", text: `🚦 *Triage status*\n${opts.statusText}` },
+      text: { type: "mrkdwn", text: `*Summary:*\n${summary}` },
+    },
+    // Status line — compact, single line with emoji
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: opts.statusText },
     },
   ];
 
@@ -284,7 +275,7 @@ export function buildSlackUpdateBlocks(
     const elements: unknown[] = [
       {
         type: "button",
-        text: { type: "plain_text", text: "Reopen / Undo Resolved", emoji: false },
+        text: { type: "plain_text", text: "🔄 Reopen / Undo Resolved", emoji: true },
         action_id: "triage_reopen",
         value: item.id,
       },
@@ -296,19 +287,19 @@ export function buildSlackUpdateBlocks(
     const elements: unknown[] = [
       {
         type: "button",
-        text: { type: "plain_text", text: "Unassign", emoji: false },
+        text: { type: "plain_text", text: "↩️ Unassign", emoji: true },
         action_id: "triage_unassign",
         value: item.id,
       },
       {
         type: "button",
-        text: { type: "plain_text", text: "Route / Notify", emoji: false },
+        text: { type: "plain_text", text: "📤 Route / Notify", emoji: true },
         action_id: "triage_route_open_modal",
         value: item.id,
       },
       {
         type: "button",
-        text: { type: "plain_text", text: "Resolved", emoji: false },
+        text: { type: "plain_text", text: "🟢 Mark Resolved", emoji: true },
         action_id: "triage_resolve",
         value: item.id,
       },
@@ -320,20 +311,20 @@ export function buildSlackUpdateBlocks(
     const elements: unknown[] = [
       {
         type: "button",
-        text: { type: "plain_text", text: "Assign to me", emoji: false },
+        text: { type: "plain_text", text: "✅ Assign to me", emoji: true },
         action_id: "triage_assign_to_me",
         value: item.id,
         style: "primary",
       },
       {
         type: "button",
-        text: { type: "plain_text", text: "Route / Notify", emoji: false },
+        text: { type: "plain_text", text: "📤 Route / Notify", emoji: true },
         action_id: "triage_route_open_modal",
         value: item.id,
       },
       {
         type: "button",
-        text: { type: "plain_text", text: "Resolved", emoji: false },
+        text: { type: "plain_text", text: "🟢 Mark Resolved", emoji: true },
         action_id: "triage_resolve",
         value: item.id,
       },
@@ -341,20 +332,6 @@ export function buildSlackUpdateBlocks(
     if (viewEmailButton) elements.push(viewEmailButton);
     blocks.push({ type: "actions", elements });
   }
-
-  // Email details
-  blocks.push({ type: "divider" });
-  blocks.push({
-    type: "section",
-    fields: [
-      { type: "mrkdwn", text: `*From:*\n${senderDisplay}` },
-      { type: "mrkdwn", text: `*To:*\n${item.source_inbox_email}` },
-    ],
-  });
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: `*Summary:*\n${summary}` },
-  });
 
   return { text: fallbackText, blocks };
 }

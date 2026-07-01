@@ -348,9 +348,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         return NextResponse.json({ ok: true });
       }
 
-      const statusText =
-        `*Status:* New\n` +
-        `*Last action:* Unassigned by <@${slackUserId}>`;
+      const statusText = `🆕 *Status:* New (unassigned by <@${slackUserId}>)`;
 
       await logEvent({
         inboundEmailId: item.inbound_email_id,
@@ -385,9 +383,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     switch (action.action_id) {
       case "triage_assign_to_me": {
         item = await assignTriageItem(triageItemId, slackUsername);
-        statusText =
-          `*Status:* Assigned\n` +
-          `*Last action:* Assigned by <@${slackUserId}>`;
+        statusText = `✅ *Status:* Assigned to <@${slackUserId}>`;
         eventType = "triage_assigned_from_slack";
         auditAction = `Assigned to <@${slackUserId}> (${slackUsername}) via Slack button`;
         break;
@@ -395,13 +391,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
       case "triage_resolve": {
         item = await resolveTriageItem(triageItemId);
-        const resolvedAt = item.resolved_at
-          ? item.resolved_at.toUTCString()
-          : new Date().toUTCString();
-        statusText =
-          `*Status:* Resolved\n` +
-          `*Resolved at:* ${resolvedAt}\n` +
-          `*Last action:* Marked resolved by <@${slackUserId}>`;
+        statusText = `✅ *Status:* Resolved by <@${slackUserId}>`;
         eventType = "triage_resolved_from_slack";
         auditAction = `Resolved by <@${slackUserId}> (${slackUsername}) via Slack button`;
         break;
@@ -409,9 +399,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
       case "triage_reopen": {
         item = await reopenTriageItem(triageItemId);
-        statusText =
-          `*Status:* Reopened\n` +
-          `*Last action:* Reopened by <@${slackUserId}>`;
+        statusText = `🔄 *Status:* Reopened by <@${slackUserId}>`;
         eventType = "triage_reopened_from_slack";
         auditAction = `Reopened by <@${slackUserId}> (${slackUsername}) via Slack button`;
         break;
@@ -579,9 +567,7 @@ async function handleRouteModalSubmit(
       },
     });
 
-    const statusText =
-      `*Status:* Routed to ${approved.label}\n` +
-      `*Last action:* Routed by <@${slackUserId}>`;
+    const statusText = `📤 *Status:* Routed to ${approved.label} by <@${slackUserId}>`;
     if (responseUrl) {
       await applySlackUpdate({
         item,

@@ -167,9 +167,11 @@ export default function TriageTable({ items: initialItems, showResolved }: Props
                   </div>
                 </td>
 
-                {/* Subject */}
+                {/* Subject — links to email detail page */}
                 <td className={styles.subjectCell} title={item.subject ?? ""}>
-                  {item.subject ?? <em className={styles.muted}>No subject</em>}
+                  <a href={`/emails/${item.inbound_email_id}`} style={{ color: "inherit", textDecoration: "none" }}>
+                    {item.subject ?? <em className={styles.muted}>No subject</em>}
+                  </a>
                 </td>
 
                 {/* Sender */}
