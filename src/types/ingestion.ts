@@ -5,9 +5,9 @@ export interface IngestionResult {
   runId: string;
   messagesFound: number;
   newMessagesStored: number;
+  externalMessagesStored: number;   // stored emails whose sender is outside INTERNAL_EMAIL_DOMAINS
   duplicatesSkipped: number;
-  externalMessagesSkipped: number;
-  automatedAlertsSkipped: number;
+  automatedAlertsSkipped: number;   // no-reply/noreply/alerts senders without operational signal
   attachmentsFound: number;
   attachmentsStored: number;
   attachmentParseFailures: number;
@@ -33,8 +33,9 @@ export interface ProcessMessageInput {
 export interface ProcessMessageResult {
   stored: boolean;
   skipped: boolean;
-  skipReason?: "duplicate" | "internal" | "automated_alert" | "not_inbox";
+  skipReason?: "duplicate" | "automated_alert" | "not_inbox";
   inboundEmailId?: string;
+  isExternal?: boolean;  // set when stored=true, reflects is_external label on the email
 }
 
 export interface AttachmentProcessingInput {
@@ -61,7 +62,7 @@ export interface EmailFilterResult {
   isExternal: boolean;
   isAutomatedAlert: boolean;
   hasInboxLabel: boolean;
-  skipReason?: "internal" | "automated_alert" | "not_inbox";
+  skipReason?: "automated_alert" | "not_inbox";
 }
 
 export interface GmailWatchResult {

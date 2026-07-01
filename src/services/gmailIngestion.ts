@@ -62,8 +62,8 @@ export async function processPubSubNotification(body: unknown): Promise<Ingestio
     runId,
     messagesFound: 0,
     newMessagesStored: 0,
+    externalMessagesStored: 0,
     duplicatesSkipped: 0,
-    externalMessagesSkipped: 0,
     automatedAlertsSkipped: 0,
     attachmentsFound: 0,
     attachmentsStored: 0,
@@ -91,12 +91,23 @@ export async function processPubSubNotification(body: unknown): Promise<Ingestio
     await logError({ ingestionRunId: run.id, monitoredInboxId: inbox.id, stage: "history_fetch_failed", error: err });
   }
 
+  console.log(
+    `[ingestion] run=${runId} ` +
+    `messagesFound=${counts.messagesFound} ` +
+    `newMessagesStored=${counts.newMessagesStored} ` +
+    `externalMessagesStored=${counts.externalMessagesStored} ` +
+    `duplicatesSkipped=${counts.duplicatesSkipped} ` +
+    `automatedAlertsSkipped=${counts.automatedAlertsSkipped} ` +
+    `attachmentsStored=${counts.attachmentsStored} ` +
+    `errors=${counts.errors}`
+  );
+
   await finishRun(run, {
     inboxesChecked: 1,
     messagesFound: counts.messagesFound,
     newMessagesStored: counts.newMessagesStored,
     duplicatesSkipped: counts.duplicatesSkipped,
-    externalMessagesSkipped: counts.externalMessagesSkipped,
+    externalMessagesSkipped: 0,       // no longer filtered by sender domain
     automatedAlertsSkipped: counts.automatedAlertsSkipped,
     attachmentsFound: counts.attachmentsFound,
     attachmentsStored: counts.attachmentsStored,
@@ -144,8 +155,14 @@ async function processHistoryForInbox(
         counts
       );
 
-      if (result.stored) counts.newMessagesStored++;
-      else if (result.skipReason === "duplicate") counts.duplicatesSkipped++;
+      if (result.stored) {
+        counts.newMessagesStored++;
+        if (result.isExternal) counts.externalMessagesStored++;
+      } else if (result.skipReason === "duplicate") {
+        counts.duplicatesSkipped++;
+      } else if (result.skipReason === "automated_alert") {
+        counts.automatedAlertsSkipped++;
+      }
 
       if (result.stored && result.inboundEmailId && env.AUTO_TRIAGE_NEW_EMAILS === "true") {
         try {
@@ -154,8 +171,6 @@ async function processHistoryForInbox(
           console.error(`[ingestion] auto-triage uncaught error for email=${result.inboundEmailId}:`, err);
         }
       }
-      else if (result.skipReason === "internal") counts.externalMessagesSkipped++;
-      else if (result.skipReason === "automated_alert") counts.automatedAlertsSkipped++;
     } catch (err) {
       counts.errors++;
       await logError({
@@ -243,7 +258,12 @@ async function processMessage(
     return { stored: false, skipped: true, skipReason: "duplicate" };
   }
 
-  console.log(`[message] stored messageId=${input.messageId} subject="${headers.subject}"`);
+  console.log(
+    `[message] stored messageId=${input.messageId} ` +
+    `subject="${headers.subject}" ` +
+    `sender=${headers.senderEmail} ` +
+    `isExternal=${filterResult.isExternal}`
+  );
 
   // Process attachments for the stored email.
   const attachmentResult = await processAttachmentsForEmail(
@@ -260,7 +280,7 @@ async function processMessage(
   counts.attachmentsStored += attachmentResult.stored;
   counts.attachmentParseFailures += attachmentResult.parseFailures;
 
-  return { stored: true, skipped: false, inboundEmailId: emailRow.id };
+  return { stored: true, skipped: false, inboundEmailId: emailRow.id, isExternal: filterResult.isExternal };
 }
 
 function emptyResult(status: IngestionResult["status"]): IngestionResult {
@@ -268,8 +288,8 @@ function emptyResult(status: IngestionResult["status"]): IngestionResult {
     runId: "",
     messagesFound: 0,
     newMessagesStored: 0,
+    externalMessagesStored: 0,
     duplicatesSkipped: 0,
-    externalMessagesSkipped: 0,
     automatedAlertsSkipped: 0,
     attachmentsFound: 0,
     attachmentsStored: 0,
