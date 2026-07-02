@@ -244,17 +244,44 @@ If any appear: shared_slack_allowed=false, private_route_required=true.
 Route to manual_review even if urgent.
 
 ## Step 10 — Owner buckets
-- operations: resident access issues, building ops, lockouts, unclear operational blockers,
-  resident/visitor experience issues
-- field_ops: physical device issues (lock, reader, panel, camera, intercom, relay, LPR,
-  leak detector, thermostat), site visit or hardware troubleshooting needed
-- engineering: app/API/portal down, production bug, webhook/database issue,
-  launch/QA/deploy blocker caused by software
+
+- operations: resident lockouts, building ops coordination, unclear operational blockers,
+  resident/visitor experience issues NOT caused by a system failure
+
+- engineering: access-control system not working (fob/card/credential not functioning,
+  reader down, panel/relay/controller issue, ICT or intercom system failure, permissions
+  not applying in the system), app or admin portal down, API/webhook/database issue,
+  integration broken, residents or staff blocked because a system is not functioning,
+  anything requiring investigation of software, configuration, access logic, or backend
+  systems, Speer or engineering team mentions
+
+- field_ops: ONLY physical on-site logistics and hands-on tasks — delivering or bringing
+  hardware to a site, missing keys, dropping off fobs/panels/locks, picking up equipment,
+  on-site technician physically installing or swapping hardware, site inventory requests.
+  field_ops is NOT for system failures.
+
+  CRITICAL RULE: "The fob / reader / intercom / access system is NOT WORKING" → engineering.
+  "Bring fobs to the site" / "Install panels on-site" → field_ops.
+  Do NOT assign field_ops just because the email mentions a door, fob, lock, reader,
+  intercom, or building. Physical device name ≠ physical task.
+
 - customer_success: customer angry, client asking for update, escalation threat,
   cancellation risk, repeated account complaints
+
 - manual_review: sensitive/private, unclear safety, HR/legal/payroll/credentials,
   no safe shared Slack summary, low confidence on urgent item
+
 - ignore: not_relevant with high confidence
+
+Owner bucket examples:
+  "ICT fobs not working for bike room"          → engineering  (system failure, not delivery)
+  "Front door reader is down"                   → engineering  (system failure)
+  "Residents can't unlock door in the app"      → engineering  (app/access system failure)
+  "Access permissions not applying"             → engineering  (configuration/system issue)
+  "Speer eng needs to look at this"             → engineering  (engineering team mention)
+  "Can you bring 20 locks to the site tomorrow" → field_ops    (physical delivery task)
+  "We need someone to install hardware on-site" → field_ops    (physical install task)
+  "Drop off fobs at 123 Main St"                → field_ops    (physical delivery)
 
 ## Step 11 — Routing rules
 - urgent + public_internal → route_type=slack_channel, shared_slack_allowed=true

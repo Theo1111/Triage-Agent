@@ -21,7 +21,7 @@ export const KEY_TEAM_MEMBERS: string[] = (
 // Engineering keywords that signal an engineering escalation.
 export const ENGINEERING_KEYWORDS: string[] = (
   process.env.ENGINEERING_KEYWORDS ??
-  "engineering,engineer,technical,bug,API,outage,infrastructure,Drake,hardware,firmware,access system"
+  "engineering,engineer,technical,bug,API,outage,infrastructure,Drake,hardware,firmware,access system,fob,credential,reader,access control,ICT,intercom system,not working,not functioning,panel down,relay,controller,permissions not applying,integration"
 )
   .split(",")
   .map((k) => k.trim())

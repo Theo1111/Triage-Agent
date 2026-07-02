@@ -15,9 +15,13 @@ export const TEAM_CATEGORIES: Record<string, string[]> = {
     "building_infrastructure",
     "hardware_or_device",
     "cameras_or_security_video",
+  ],
+  engineering: [
+    "app_or_software",
+    "engineering_blocker",
+    "access_control",
     "ict_or_intercom",
   ],
-  engineering: ["app_or_software", "engineering_blocker"],
   customer_success: ["customer_escalation"],
   field_ops: ["field_ops"],
 };
