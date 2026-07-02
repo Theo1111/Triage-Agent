@@ -203,9 +203,6 @@ export default function TriageTable({ items: initialItems }: Props) {
               <th>Sender</th>
               <th>Category</th>
               <th>Summary</th>
-              <th>Owner</th>
-              <th>Route</th>
-              <th>Sens.</th>
               <th>Age</th>
               <th>Actions</th>
             </tr>
@@ -278,29 +275,6 @@ export default function TriageTable({ items: initialItems }: Props) {
                         → {item.recommended_next_step}
                       </span>
                     )}
-                  </td>
-
-                  {/* Owner */}
-                  <td>
-                    {item.owner ? (
-                      <span className={styles.ownerTag}>{item.owner}</span>
-                    ) : (
-                      <span className={styles.muted}>—</span>
-                    )}
-                  </td>
-
-                  {/* Route */}
-                  <td>
-                    <span className={`${styles.badge} ${ROUTE_CLASS[item.route_type] ?? styles.routeDashboard}`}>
-                      {ROUTE_LABEL[item.route_type] ?? item.route_type}
-                    </span>
-                  </td>
-
-                  {/* Sensitivity */}
-                  <td>
-                    <span className={`${styles.badge} ${SENS_CLASS[item.sensitivity_level] ?? styles.sensUnknown}`}>
-                      {item.sensitivity_level.replace(/_/g, " ")}
-                    </span>
                   </td>
 
                   {/* Age */}

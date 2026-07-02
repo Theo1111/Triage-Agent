@@ -219,8 +219,8 @@
 }
 
 .summaryCell {
-  max-width: 300px;
-  min-width: 180px;
+  max-width: 480px;
+  min-width: 260px;
   color: #374151;
   overflow: hidden;
   display: -webkit-box;
