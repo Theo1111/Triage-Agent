@@ -1,5 +1,6 @@
 import * as triageRepo from "@/src/repositories/triageItemsRepository";
 import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
+import { canonicalOperator } from "@/src/config/operatorMap";
 import { getCurrentClassification } from "@/src/services/classification";
 import { getCurrentRoutingRecommendation } from "@/src/services/routingRecommendations";
 import type {
@@ -106,8 +107,10 @@ export async function assignTriageItem(
     throw new Error(`Cannot assign a resolved triage item: ${triageItemId}`);
   }
 
-  const updated = await triageRepo.assignItem(triageItemId, owner);
-  console.log(`[triage] assigned item=${triageItemId} owner=${owner}`);
+  // Normalize to canonical identity so Slack and dashboard assignments match.
+  const canonicalOwner = canonicalOperator(owner) || owner;
+  const updated = await triageRepo.assignItem(triageItemId, canonicalOwner);
+  console.log(`[triage] assigned item=${triageItemId} owner=${canonicalOwner}`);
   return updated;
 }
 
@@ -134,8 +137,8 @@ export async function unassignTriageItem(
   if (existing.status !== "assigned") {
     throw new Error(`Cannot unassign a triage item that is not assigned: ${triageItemId}`);
   }
-  // Ownership check: only the assigned owner may unassign.
-  if (existing.owner !== requestingUsername) {
+  // Ownership check: compare canonical identities so dashboard and Slack names match.
+  if (canonicalOperator(existing.owner) !== canonicalOperator(requestingUsername)) {
     return { item: existing, ownershipError: "Only the assigned owner can unassign this item." };
   }
   const item = await triageRepo.unassignItem(triageItemId);

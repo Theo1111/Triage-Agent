@@ -8,9 +8,13 @@ import DetailDrawer from "./DetailDrawer";
 
 interface Props {
   items: SerializedTriageItem[];
+  operator: string;
+  onItemUpdated: (updated: SerializedTriageItem) => void;
+  onOperatorChange: (name: string) => void;
+  onRefresh: () => void;
 }
 
-// ── Badge class helpers ──────────────────────────────────────────────────────
+// ── Badge helpers ─────────────────────────────────────────────────────────────
 
 const URGENCY_CLASS: Record<string, string> = {
   urgent:       styles.badgeUrgent,
@@ -27,28 +31,8 @@ const STATUS_CLASS: Record<string, string> = {
   ignored:       styles.statusIgnored,
   archived:      styles.statusArchived,
 };
-const SENS_CLASS: Record<string, string> = {
-  public_internal: styles.sensPublicInternal,
-  private:         styles.sensPrivate,
-  sensitive:       styles.sensSensitive,
-  unknown:         styles.sensUnknown,
-};
-const ROUTE_CLASS: Record<string, string> = {
-  slack_channel:  styles.routeSlack,
-  private_owner:  styles.routePrivate,
-  dashboard_only: styles.routeDashboard,
-  manual_review:  styles.routeManualReview,
-  ignore:         styles.routeIgnore,
-};
-const ROUTE_LABEL: Record<string, string> = {
-  slack_channel:  "Slack",
-  private_owner:  "Private",
-  dashboard_only: "Dashboard",
-  manual_review:  "Manual Review",
-  ignore:         "Ignore",
-};
 
-// ── Date helpers ─────────────────────────────────────────────────────────────
+// ── Date helpers ──────────────────────────────────────────────────────────────
 
 function ageMs(iso: string): number {
   return Date.now() - new Date(iso).getTime();
@@ -74,39 +58,53 @@ function fmtDate(iso: string | null): string {
   });
 }
 
-// ── Operator storage ─────────────────────────────────────────────────────────
-// Stores the current operator's username in localStorage so dashboard actions
-// are attributed correctly in audit logs and Slack cards.
+// ── Operator storage ──────────────────────────────────────────────────────────
 
 const OPERATOR_KEY = "triage_dashboard_operator";
 
 function loadOperator(): string {
-  try {
-    return localStorage.getItem(OPERATOR_KEY) ?? "";
-  } catch {
-    return "";
-  }
+  try { return localStorage.getItem(OPERATOR_KEY) ?? ""; } catch { return ""; }
 }
-
 function saveOperator(name: string) {
-  try {
-    localStorage.setItem(OPERATOR_KEY, name);
-  } catch {}
+  try { localStorage.setItem(OPERATOR_KEY, name); } catch {}
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+// ── Component ─────────────────────────────────────────────────────────────────
 
-export default function TriageTable({ items: initialItems }: Props) {
-  const [items, setItems] = useState(initialItems);
+export default function TriageTable({
+  items,
+  operator: operatorProp,
+  onItemUpdated,
+  onOperatorChange,
+  onRefresh,
+}: Props) {
   const [selectedItem, setSelectedItem] = useState<SerializedTriageItem | null>(null);
-  const [loadingId, setLoadingId] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [operator, setOperator] = useState<string>("");
+  const [loadingId,    setLoadingId]    = useState<string | null>(null);
+  const [errors,       setErrors]       = useState<Record<string, string>>({});
+  const [operator,     setOperatorLocal] = useState<string>(operatorProp);
 
   // Load saved operator on mount
   useEffect(() => {
-    setOperator(loadOperator());
+    const saved = loadOperator();
+    if (saved) {
+      setOperatorLocal(saved);
+      onOperatorChange(saved);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep in sync if parent changes it
+  useEffect(() => {
+    if (operatorProp && operatorProp !== operator) {
+      setOperatorLocal(operatorProp);
+    }
+  }, [operatorProp, operator]);
+
+  function setOperator(name: string) {
+    setOperatorLocal(name);
+    saveOperator(name);
+    onOperatorChange(name);
+  }
 
   function getOperator(): string {
     if (operator) return operator;
@@ -115,20 +113,15 @@ export default function TriageTable({ items: initialItems }: Props) {
     );
     const trimmed = (name ?? "").trim() || "dashboard";
     setOperator(trimmed);
-    saveOperator(trimmed);
     return trimmed;
   }
 
   function changeOperator() {
     const name = window.prompt("Change operator name:", operator);
-    if (name !== null) {
-      const trimmed = name.trim() || "dashboard";
-      setOperator(trimmed);
-      saveOperator(trimmed);
-    }
+    if (name !== null) setOperator(name.trim() || "dashboard");
   }
 
-  // Calls a /api/dashboard/triage/* route, updates item state on success
+  // Calls a /api/dashboard/triage/* route, propagates updated item upward.
   async function quickAction(
     id: string,
     endpoint: string,
@@ -153,10 +146,13 @@ export default function TriageTable({ items: initialItems }: Props) {
         return;
       }
       if (json.triageItem) {
-        const updated = json.triageItem;
-        setItems(prev => prev.map(i => (i.id === id ? { ...i, ...updated } : i)));
-        if (selectedItem?.id === id) setSelectedItem(prev => prev ? { ...prev, ...updated } : prev);
+        onItemUpdated(json.triageItem);
+        if (selectedItem?.id === id) {
+          setSelectedItem(prev => prev ? { ...prev, ...json.triageItem } : prev);
+        }
       }
+      // Refresh counts after any status-changing action.
+      onRefresh();
     } catch (err) {
       setErrors(prev => ({
         ...prev,
@@ -169,13 +165,14 @@ export default function TriageTable({ items: initialItems }: Props) {
 
   async function handleAssign(id: string) {
     const actorName = getOperator();
-    const owner = window.prompt(`Assign to (name or username):`);
+    const owner = window.prompt("Assign to (name or username):");
     if (owner?.trim()) await quickAction(id, "assign", { owner: owner.trim(), actor: actorName });
   }
 
-  function handleItemUpdated(updated: SerializedTriageItem) {
-    setItems(prev => prev.map(i => (i.id === updated.id ? { ...i, ...updated } : i)));
+  function handleItemUpdatedFromDrawer(updated: SerializedTriageItem) {
+    onItemUpdated(updated);
     setSelectedItem(prev => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+    onRefresh();
   }
 
   if (items.length === 0) {
@@ -186,9 +183,7 @@ export default function TriageTable({ items: initialItems }: Props) {
     <>
       {/* Operator bar */}
       <div className={styles.operatorBar}>
-        <span className={styles.operatorLabel}>
-          Operator:
-        </span>
+        <span className={styles.operatorLabel}>Operator:</span>
         <button className={styles.operatorBtn} onClick={changeOperator}>
           {operator || "Set your name…"}
         </button>
@@ -209,9 +204,9 @@ export default function TriageTable({ items: initialItems }: Props) {
           </thead>
           <tbody>
             {items.map(item => {
-              const ms = ageMs(item.created_at);
+              const ms        = ageMs(item.created_at);
               const isSelected = selectedItem?.id === item.id;
-              const isLoading = loadingId === item.id;
+              const isLoading  = loadingId === item.id;
               return (
                 <tr
                   key={item.id}
@@ -222,7 +217,7 @@ export default function TriageTable({ items: initialItems }: Props) {
                   onClick={() => setSelectedItem(isSelected ? null : item)}
                   style={{ cursor: "pointer" }}
                 >
-                  {/* Status badges */}
+                  {/* Status */}
                   <td onClick={e => e.stopPropagation()}>
                     <div className={styles.badges}>
                       <span className={`${styles.badge} ${URGENCY_CLASS[item.urgency_level] ?? styles.badgeUnknown}`}>
@@ -265,15 +260,10 @@ export default function TriageTable({ items: initialItems }: Props) {
                   </td>
 
                   {/* Summary */}
-                  <td
-                    className={styles.summaryCell}
-                    title={item.summary ?? ""}
-                  >
+                  <td className={styles.summaryCell} title={item.summary ?? ""}>
                     {item.summary ?? <em className={styles.muted}>No summary</em>}
                     {item.recommended_next_step && (
-                      <span className={styles.nextStep}>
-                        → {item.recommended_next_step}
-                      </span>
+                      <span className={styles.nextStep}>→ {item.recommended_next_step}</span>
                     )}
                   </td>
 
@@ -283,7 +273,7 @@ export default function TriageTable({ items: initialItems }: Props) {
                     <div className={styles.updatedAt}>{fmtDate(item.updated_at)}</div>
                   </td>
 
-                  {/* Inline actions */}
+                  {/* Actions */}
                   <td className={styles.actionsCell} onClick={e => e.stopPropagation()}>
                     <div className={styles.actionBtns}>
                       {item.status !== "resolved" && item.status !== "archived" && (
@@ -357,8 +347,8 @@ export default function TriageTable({ items: initialItems }: Props) {
         item={selectedItem}
         operator={operator}
         onClose={() => setSelectedItem(null)}
-        onItemUpdated={handleItemUpdated}
-        onOperatorChange={(name) => { setOperator(name); saveOperator(name); }}
+        onItemUpdated={handleItemUpdatedFromDrawer}
+        onOperatorChange={setOperator}
       />
     </>
   );
