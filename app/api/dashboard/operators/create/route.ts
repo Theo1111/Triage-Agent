@@ -32,7 +32,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ profile });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
+    const raw = err instanceof Error ? err.message : "Unknown error";
+    const msg = raw.includes("operator_profiles") || raw.includes("42P01")
+      ? "Operator profile storage is not set up yet. Please run the operator_profiles migration."
+      : raw;
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }

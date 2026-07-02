@@ -5,7 +5,6 @@ import type { SerializedTriageItem } from "./types";
 import styles from "./dashboard.module.css";
 import { formatCategoryLabel } from "@/src/lib/formatCategory";
 import DetailDrawer from "./DetailDrawer";
-import OperatorPanel, { type OperatorInfo } from "./OperatorPanel";
 
 interface Props {
   items: SerializedTriageItem[];
@@ -63,7 +62,6 @@ export default function TriageTable({ items, onItemUpdated, onRefresh }: Props) 
   const [selectedItem, setSelectedItem] = useState<SerializedTriageItem | null>(null);
   const [loadingId,    setLoadingId]    = useState<string | null>(null);
   const [errors,       setErrors]       = useState<Record<string, string>>({});
-  const [operator,     setOperator]     = useState<OperatorInfo | null>(null);
 
   // Calls a /api/dashboard/triage/* route; actor is derived server-side from the
   // session cookie — no actor field is sent from the client.
@@ -121,18 +119,11 @@ export default function TriageTable({ items, onItemUpdated, onRefresh }: Props) 
   }
 
   if (items.length === 0) {
-    return (
-      <>
-        <OperatorPanel onOperatorChange={setOperator} />
-        <p className={styles.empty}>No items match the current filter.</p>
-      </>
-    );
+    return <p className={styles.empty}>No items match the current filter.</p>;
   }
 
   return (
     <>
-      <OperatorPanel onOperatorChange={setOperator} />
-
       <div className={styles.tableWrapper}>
         <table className={styles.table}>
           <thead>

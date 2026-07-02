@@ -3,6 +3,7 @@ import { query } from "@/src/lib/db";
 import type { TriageItem } from "@/src/types/database";
 import type { SerializedTriageItem, TabCounts } from "./types";
 import DashboardClient from "./DashboardClient";
+import DashboardHeaderActions from "./DashboardHeaderActions";
 import styles from "./dashboard.module.css";
 import { TEAM_CATEGORIES } from "@/src/config/roles";
 
@@ -163,7 +164,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   try {
     [allItems, counts] = await Promise.all([fetchAllItems(), fetchTabCounts()]);
   } catch (err) {
-    dbError = err instanceof Error ? err.message : "Unknown database error";
+    const raw = err instanceof Error ? err.message : "Unknown database error";
+    dbError = raw.includes("operator_profiles") || raw.includes("42P01")
+      ? "Operator profile storage is not set up yet. Please run the operator_profiles migration."
+      : raw;
   }
 
   const openItems    = allItems.filter(i => !["resolved", "archived", "ignored"].includes(i.status));
@@ -180,7 +184,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           <h1 className={styles.title}>Triage Dashboard</h1>
           <p className={styles.subtitle}>Grata / Speer Operations Intelligence</p>
         </div>
-        <a href="/dashboard" className={styles.refreshBtn}>↻ Refresh</a>
+        <DashboardHeaderActions />
       </header>
 
       {dbError && (
