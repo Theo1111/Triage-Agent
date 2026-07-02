@@ -218,25 +218,6 @@
   max-width: 180px;
 }
 
-.summaryCell {
-  max-width: 420px;
-  min-width: 180px;
-  color: #374151;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.nextStep {
-  font-size: 11px;
-  color: #059669;
-  margin-top: 5px;
-  font-style: italic;
-  display: block;
-  white-space: normal;
-  -webkit-line-clamp: unset;
-}
-
 .ownerTag {
   display: inline-block;
   background: #eff6ff;
@@ -556,3 +537,60 @@
   cursor: pointer;
 }
 .operatorBtn:hover { background: #dbeafe; }
+.operatorBtnSecondary {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.operatorBtnSecondary:hover { background: #f3f4f6; }
+
+.operatorPanel {
+  padding: 10px 0 14px;
+}
+.operatorForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.operatorFormLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  margin-right: 4px;
+}
+.operatorInput {
+  font-size: 12px;
+  padding: 4px 9px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  color: #111827;
+  background: #fff;
+  outline: none;
+}
+.operatorInput:focus { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
+.operatorSelect {
+  font-size: 12px;
+  padding: 4px 9px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  color: #111827;
+  background: #fff;
+  outline: none;
+}
+.operatorSelect:focus { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
+.operatorErr {
+  font-size: 11px;
+  color: #dc2626;
+  width: 100%;
+}
+.operatorName {
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+}

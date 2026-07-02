@@ -79,7 +79,6 @@ export default function DashboardClient({
   const [activeTeam, setActiveTeam] = useState(initialTeam);
   const [search,     setSearch]     = useState(initialSearch);
   const [allItems,   setAllItems]   = useState(initialItems);
-  const [operator,   setOperator]   = useState("");
 
   // When server rerenders (router.refresh()), pull in fresh items + counts.
   useEffect(() => {
@@ -138,9 +137,7 @@ export default function DashboardClient({
       />
       <TriageTable
         items={items}
-        operator={operator}
         onItemUpdated={handleItemUpdated}
-        onOperatorChange={setOperator}
         onRefresh={handleRefresh}
       />
     </>

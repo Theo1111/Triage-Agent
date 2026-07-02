@@ -45,6 +45,10 @@ const envSchema = z.object({
   // /invite @<bot-name> inside the channel before routing will work.
   SLACK_ROUTE_TEST_CHANNEL_ID: z.string().optional(),
 
+  // Dashboard operator session secret — signs HttpOnly cookies for triage actors.
+  // Set a long random string in production: openssl rand -hex 32
+  DASHBOARD_OPERATOR_SESSION_SECRET: z.string().optional(),
+
   // Future domain-wide delegation — not used in V1
   GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL: z.string().optional(),
   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().optional(),

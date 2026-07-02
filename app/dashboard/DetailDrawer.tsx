@@ -7,10 +7,8 @@ import { formatCategoryLabel } from "@/src/lib/formatCategory";
 
 interface Props {
   item: SerializedTriageItem | null;
-  operator: string;
   onClose: () => void;
   onItemUpdated: (updated: SerializedTriageItem) => void;
-  onOperatorChange: (name: string) => void;
 }
 
 function fmtDate(iso: string | null): string {
@@ -21,50 +19,39 @@ function fmtDate(iso: string | null): string {
   });
 }
 
-export default function DetailDrawer({
-  item,
-  operator,
-  onClose,
-  onItemUpdated,
-  onOperatorChange,
-}: Props) {
-  const [loading, setLoading] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [editOwner, setEditOwner] = useState(false);
-  const [ownerInput, setOwnerInput] = useState("");
+export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
+  const [loading,     setLoading]     = useState<string | null>(null);
+  const [error,       setError]       = useState<string | null>(null);
+  const [editOwner,   setEditOwner]   = useState(false);
+  const [ownerInput,  setOwnerInput]  = useState("");
   const [editSummary, setEditSummary] = useState(false);
   const [summaryInput, setSummaryInput] = useState("");
 
   if (!item) return null;
 
-  function getActor(): string {
-    if (operator) return operator;
-    const name = window.prompt(
-      "Enter your name or username to track this action (e.g., tblumberg):"
-    );
-    const trimmed = (name ?? "").trim() || "dashboard";
-    onOperatorChange(trimmed);
-    return trimmed;
-  }
-
+  // Actor is derived server-side from the HttpOnly session cookie.
+  // The client never sends an actor value.
   async function callDashboard(
     endpoint: string,
     body: Record<string, unknown> = {}
   ): Promise<SerializedTriageItem | null> {
     setError(null);
     setLoading(endpoint);
-    const actorName = getActor();
     try {
       const res = await fetch(`/api/dashboard/triage/${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ triageItemId: item!.id, actor: actorName, ...body }),
+        body: JSON.stringify({ triageItemId: item!.id, ...body }),
       });
       const json = (await res.json()) as {
         success?: boolean;
         triageItem?: SerializedTriageItem;
         error?: string;
       };
+      if (res.status === 401) {
+        setError("Session expired — please log in again.");
+        return null;
+      }
       if (!res.ok || !json.success) {
         setError(json.error ?? `HTTP ${res.status}`);
         return null;
@@ -102,10 +89,9 @@ export default function DetailDrawer({
     setSummaryInput("");
   }
 
-  const busy = loading !== null;
-  const isActive = item.status !== "resolved" && item.status !== "archived";
+  const busy      = loading !== null;
+  const isActive  = item.status !== "resolved" && item.status !== "archived";
   const isAssigned = item.status === "assigned" || item.status === "escalated";
-  const viewEmailUrl = `/emails/${item.inbound_email_id}`;
 
   return (
     <>
@@ -116,9 +102,7 @@ export default function DetailDrawer({
           <div className={styles.drawerTitle}>
             {item.subject ?? <em>No subject</em>}
           </div>
-          <button className={styles.drawerClose} onClick={onClose} aria-label="Close">
-            ✕
-          </button>
+          <button className={styles.drawerClose} onClick={onClose} aria-label="Close">✕</button>
         </div>
 
         {error && <div className={styles.drawerError}>{error}</div>}
@@ -135,51 +119,31 @@ export default function DetailDrawer({
                 {loading === "assign" ? "…" : "✅ Assign"}
               </button>
               {isAssigned && (
-                <button
-                  className={styles.drawerBtn}
-                  onClick={() => handleAction("unassign")}
-                  disabled={busy}
-                >
+                <button className={styles.drawerBtn} onClick={() => handleAction("unassign")} disabled={busy}>
                   {loading === "unassign" ? "…" : "↩️ Unassign"}
                 </button>
               )}
               {!isAssigned && (
-                <button
-                  className={styles.drawerBtn}
-                  onClick={() => handleAction("escalate")}
-                  disabled={busy}
-                >
+                <button className={styles.drawerBtn} onClick={() => handleAction("escalate")} disabled={busy}>
                   {loading === "escalate" ? "…" : "🔺 Escalate"}
                 </button>
               )}
-              <button
-                className={styles.drawerBtn}
-                onClick={() => handleAction("resolve")}
-                disabled={busy}
-              >
+              <button className={styles.drawerBtn} onClick={() => handleAction("resolve")} disabled={busy}>
                 {loading === "resolve" ? "…" : "🟢 Resolve"}
               </button>
             </>
           )}
           {item.status === "resolved" && (
-            <button
-              className={styles.drawerBtn}
-              onClick={() => handleAction("reopen")}
-              disabled={busy}
-            >
+            <button className={styles.drawerBtn} onClick={() => handleAction("reopen")} disabled={busy}>
               {loading === "reopen" ? "…" : "🔄 Reopen"}
             </button>
           )}
           {item.status !== "archived" && (
-            <button
-              className={`${styles.drawerBtn} ${styles.drawerBtnDanger}`}
-              onClick={() => handleAction("archive", { archivedBy: operator || "dashboard" })}
-              disabled={busy}
-            >
+            <button className={`${styles.drawerBtn} ${styles.drawerBtnDanger}`} onClick={() => handleAction("archive")} disabled={busy}>
               {loading === "archive" ? "…" : "🗄️ Archive"}
             </button>
           )}
-          <a className={`${styles.drawerBtn} ${styles.drawerBtnLink}`} href={viewEmailUrl}>
+          <a className={`${styles.drawerBtn} ${styles.drawerBtnLink}`} href={`/emails/${item.inbound_email_id}`}>
             📬 View Email
           </a>
         </div>
@@ -193,21 +157,16 @@ export default function DetailDrawer({
           </DrawerField>
           <DrawerField label="To">{item.source_inbox_email}</DrawerField>
           <DrawerField label="Received">{fmtDate(item.created_at)}</DrawerField>
-          <DrawerField label="Category">
-            {formatCategoryLabel(item.primary_category)}
-          </DrawerField>
+          <DrawerField label="Category">{formatCategoryLabel(item.primary_category)}</DrawerField>
         </div>
 
-        {/* Classification */}
+        {/* AI Classification */}
         <div className={styles.drawerSection}>
           <div className={styles.drawerSectionTitle}>AI Classification</div>
           <DrawerField label="Urgency">{item.urgency_level}</DrawerField>
-          {item.urgency_reason && (
-            <DrawerField label="Reason">{item.urgency_reason}</DrawerField>
-          )}
-          <DrawerField label="Sensitivity">
-            {item.sensitivity_level.replace(/_/g, " ")}
-          </DrawerField>
+          {item.urgency_reason && <DrawerField label="Reason">{item.urgency_reason}</DrawerField>}
+          <DrawerField label="Sensitivity">{item.sensitivity_level.replace(/_/g, " ")}</DrawerField>
+
           {/* Editable summary */}
           <div className={styles.drawerField}>
             <span className={styles.drawerLabel}>Summary</span>
@@ -221,15 +180,8 @@ export default function DetailDrawer({
                   autoFocus
                 />
                 <div className={styles.drawerEditActions}>
-                  <button className={styles.drawerBtnSm} onClick={handleSaveSummary} disabled={busy}>
-                    Save
-                  </button>
-                  <button
-                    className={styles.drawerBtnSmCancel}
-                    onClick={() => { setEditSummary(false); setSummaryInput(""); }}
-                  >
-                    Cancel
-                  </button>
+                  <button className={styles.drawerBtnSm} onClick={handleSaveSummary} disabled={busy}>Save</button>
+                  <button className={styles.drawerBtnSmCancel} onClick={() => { setEditSummary(false); setSummaryInput(""); }}>Cancel</button>
                 </div>
               </div>
             ) : (
@@ -242,6 +194,7 @@ export default function DetailDrawer({
               </span>
             )}
           </div>
+
           {item.recommended_next_step && (
             <DrawerField label="Next step">{item.recommended_next_step}</DrawerField>
           )}
@@ -251,6 +204,7 @@ export default function DetailDrawer({
         <div className={styles.drawerSection}>
           <div className={styles.drawerSectionTitle}>Triage</div>
           <DrawerField label="Status">{item.status.replace(/_/g, " ")}</DrawerField>
+
           {/* Editable owner */}
           <div className={styles.drawerField}>
             <span className={styles.drawerLabel}>Owner</span>
@@ -266,15 +220,8 @@ export default function DetailDrawer({
                   onKeyDown={e => { if (e.key === "Enter") handleSaveOwner(); }}
                 />
                 <div className={styles.drawerEditActions}>
-                  <button className={styles.drawerBtnSm} onClick={handleSaveOwner} disabled={busy}>
-                    Save
-                  </button>
-                  <button
-                    className={styles.drawerBtnSmCancel}
-                    onClick={() => { setEditOwner(false); setOwnerInput(""); }}
-                  >
-                    Cancel
-                  </button>
+                  <button className={styles.drawerBtnSm} onClick={handleSaveOwner} disabled={busy}>Save</button>
+                  <button className={styles.drawerBtnSmCancel} onClick={() => { setEditOwner(false); setOwnerInput(""); }}>Cancel</button>
                 </div>
               </div>
             ) : (
@@ -287,13 +234,10 @@ export default function DetailDrawer({
               </span>
             )}
           </div>
+
           <DrawerField label="Route">{item.route_type.replace(/_/g, " ")}</DrawerField>
-          {item.assigned_at && (
-            <DrawerField label="Assigned">{fmtDate(item.assigned_at)}</DrawerField>
-          )}
-          {item.resolved_at && (
-            <DrawerField label="Resolved">{fmtDate(item.resolved_at)}</DrawerField>
-          )}
+          {item.assigned_at && <DrawerField label="Assigned">{fmtDate(item.assigned_at)}</DrawerField>}
+          {item.resolved_at && <DrawerField label="Resolved">{fmtDate(item.resolved_at)}</DrawerField>}
           {item.archived_at && (
             <DrawerField label="Archived">
               {fmtDate(item.archived_at)} by {item.archived_by ?? "—"}
@@ -312,8 +256,6 @@ export default function DetailDrawer({
     </>
   );
 }
-
-// ── Small helper ─────────────────────────────────────────────────────────────
 
 function DrawerField({ label, children }: { label: string; children: React.ReactNode }) {
   return (

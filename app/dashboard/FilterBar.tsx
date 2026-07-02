@@ -45,7 +45,7 @@ export default function FilterBar({
         <input
           type="search"
           className={styles.searchInput}
-          placeholder="Search subject, sender, summary…"
+          placeholder="Search subject, sender…"
           value={search}
           onChange={e => onSearchChange(e.target.value)}
         />
