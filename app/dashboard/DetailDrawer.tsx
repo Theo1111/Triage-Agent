@@ -140,7 +140,11 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
               {loading === "reopen" ? "…" : "🔄 Reopen"}
             </button>
           )}
-          {!isArchived && (
+          {isArchived ? (
+            <button className={styles.drawerBtn} onClick={() => handleAction("unarchive")} disabled={busy}>
+              {loading === "unarchive" ? "…" : "↩️ Restore"}
+            </button>
+          ) : (
             <button className={`${styles.drawerBtn} ${styles.drawerBtnDanger}`} onClick={() => handleAction("archive")} disabled={busy}>
               {loading === "archive" ? "…" : "🗄️ Archive"}
             </button>
@@ -243,6 +247,12 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
           {item.archived_at && (
             <DrawerField label="Archived">
               {fmtDate(item.archived_at)} by {item.archived_by ?? "—"}
+              {item.archived_reason && <span className={styles.drawerMuted}> — {item.archived_reason}</span>}
+            </DrawerField>
+          )}
+          {item.restored_at && (
+            <DrawerField label="Restored">
+              {fmtDate(item.restored_at)} by {item.restored_by ?? "—"}
             </DrawerField>
           )}
           {item.slack_channel && (

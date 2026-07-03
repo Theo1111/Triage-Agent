@@ -258,7 +258,15 @@ export default function TriageTable({ items, onItemUpdated, onRefresh }: Props) 
                                 Reopen
                               </button>
                             )}
-                            {!ds.isArchived && (
+                            {ds.isArchived ? (
+                              <button
+                                className={`${styles.btn} ${styles.btnReopen}`}
+                                onClick={() => quickAction(item.id, "unarchive")}
+                                disabled={isLoading}
+                              >
+                                Restore
+                              </button>
+                            ) : (
                               <button
                                 className={`${styles.btn} ${styles.btnArchive}`}
                                 onClick={() => quickAction(item.id, "archive")}

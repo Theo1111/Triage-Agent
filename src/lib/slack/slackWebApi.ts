@@ -25,6 +25,25 @@ async function callSlackApi(
   return res.json() as Promise<SlackApiResponse>;
 }
 
+// Delete a message permanently. Requires the bot to own the message or have
+// the chat:write scope. Non-throwing — logs and swallows on failure so callers
+// can fall back to an update instead.
+export async function deleteSlackMessage(
+  token: string,
+  channelId: string,
+  messageTs: string
+): Promise<boolean> {
+  try {
+    const result = await callSlackApi(token, "chat.delete", {
+      channel: channelId,
+      ts: messageTs,
+    });
+    return result.ok;
+  } catch {
+    return false;
+  }
+}
+
 // Edit an existing message in place.
 export async function updateSlackMessage(
   token: string,

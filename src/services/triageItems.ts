@@ -170,16 +170,32 @@ export async function reopenTriageItem(triageItemId: string): Promise<TriageItem
 
 export async function archiveTriageItem(
   triageItemId: string,
-  archivedBy: string
+  archivedBy: string,
+  archivedReason?: string | null
 ): Promise<TriageItem> {
   const item = await triageRepo.findById(triageItemId);
   if (!item) throw new Error(`Triage item not found: ${triageItemId}`);
   if (item.status === "archived") {
-    throw new Error(`Triage item already archived: ${triageItemId}`);
+    throw new Error(`already_archived: Triage item is already archived: ${triageItemId}`);
   }
 
-  const updated = await triageRepo.archiveItem(triageItemId, archivedBy);
+  const updated = await triageRepo.archiveItem(triageItemId, archivedBy, archivedReason);
   console.log(`[triage] archived item=${triageItemId} by=${archivedBy}`);
+  return updated;
+}
+
+export async function unarchiveTriageItem(
+  triageItemId: string,
+  restoredBy: string
+): Promise<TriageItem> {
+  const item = await triageRepo.findById(triageItemId);
+  if (!item) throw new Error(`item_not_found: Triage item not found: ${triageItemId}`);
+  if (item.status !== "archived") {
+    throw new Error(`not_archived: Triage item is not archived: ${triageItemId}`);
+  }
+
+  const updated = await triageRepo.unarchiveItem(triageItemId, restoredBy);
+  console.log(`[triage] unarchived item=${triageItemId} by=${restoredBy} restored_status=${updated.status}`);
   return updated;
 }
 

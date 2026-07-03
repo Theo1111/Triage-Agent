@@ -297,6 +297,9 @@ export interface TriageItem {
   escalated_at: Date | null;
   archived_at: Date | null;
   archived_by: string | null;
+  archived_reason: string | null;
+  restored_at: Date | null;
+  restored_by: string | null;
 }
 
 export type ErrorStage =

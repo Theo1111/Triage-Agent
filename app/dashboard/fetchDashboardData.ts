@@ -37,6 +37,9 @@ function serialize(row: ExtendedRow): SerializedTriageItem {
     escalated_at: toISO(row.escalated_at),
     archived_at: toISO(row.archived_at),
     archived_by: row.archived_by,
+    archived_reason: row.archived_reason,
+    restored_at: toISO(row.restored_at),
+    restored_by: row.restored_by,
     primary_category: row.primary_category,
     urgency_reason: row.urgency_reason,
   };

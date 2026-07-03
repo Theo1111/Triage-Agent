@@ -165,17 +165,48 @@ export async function reopenItem(id: string): Promise<TriageItem> {
   return row;
 }
 
-// Archive: sets status to "archived" and records who/when.
-export async function archiveItem(id: string, archivedBy: string): Promise<TriageItem> {
+// Archive: sets status to "archived" and records who/when/why.
+export async function archiveItem(
+  id: string,
+  archivedBy: string,
+  archivedReason?: string | null
+): Promise<TriageItem> {
   const row = await queryOne<TriageItem>(
     `UPDATE triage_items
-     SET status      = 'archived',
-         archived_at = now(),
-         archived_by = $2,
-         updated_at  = now()
+     SET status          = 'archived',
+         archived_at     = now(),
+         archived_by     = $2,
+         archived_reason = $3,
+         updated_at      = now()
      WHERE id = $1
      RETURNING *`,
-    [id, archivedBy]
+    [id, archivedBy, archivedReason ?? null]
+  );
+  if (!row) throw new Error(`Triage item not found: ${id}`);
+  return row;
+}
+
+// Unarchive / restore: clears archive fields, sets restored tracking, and
+// infers the previous status from timestamps (resolved_at → resolved,
+// escalated_at → escalated, assigned_at + owner → assigned, else new).
+export async function unarchiveItem(id: string, restoredBy: string): Promise<TriageItem> {
+  const row = await queryOne<TriageItem>(
+    `UPDATE triage_items
+     SET archived_at     = NULL,
+         archived_by     = NULL,
+         archived_reason = NULL,
+         restored_at     = now(),
+         restored_by     = $2,
+         status          = CASE
+           WHEN resolved_at   IS NOT NULL THEN 'resolved'
+           WHEN escalated_at  IS NOT NULL THEN 'escalated'
+           WHEN assigned_at   IS NOT NULL AND owner IS NOT NULL THEN 'assigned'
+           ELSE 'new'
+         END,
+         updated_at      = now()
+     WHERE id = $1
+     RETURNING *`,
+    [id, restoredBy]
   );
   if (!row) throw new Error(`Triage item not found: ${id}`);
   return row;

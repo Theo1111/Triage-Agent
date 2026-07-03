@@ -24,6 +24,9 @@ export interface SerializedTriageItem {
   escalated_at: string | null;
   archived_at: string | null;
   archived_by: string | null;
+  archived_reason: string | null;
+  restored_at: string | null;
+  restored_by: string | null;
   // From email_classifications JOIN
   primary_category: string | null;
   urgency_reason: string | null;
