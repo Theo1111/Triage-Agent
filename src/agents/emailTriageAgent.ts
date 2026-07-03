@@ -259,28 +259,74 @@ ${OPS_VOCABULARY_PROMPT}
   When uncertain, prefer "normal" over "not_relevant".
 
 ## Step 8 — Sensitivity levels
+
+CRITICAL DEFAULT: Normal tenant/customer support context is NOT sensitive.
+The following details appearing in a support request are expected operational data
+and do NOT make an email private or sensitive on their own:
+- Resident or customer name
+- Resident or customer email address
+- Unit number or apartment number
+- Property name or building address
+- Lock, app, access, or device issue description
+- Battery level, connectivity issue, PIN or keypad usage
+- Request for technical help or a support status update
+
+If the ONLY reason to mark an email sensitive is that it contains standard resident/customer
+contact info alongside a support request → classify as public_internal, not sensitive.
+
 - public_internal: Safe to summarize in shared internal Slack. Operational issue with no
-  confidential content. Examples: lockout, hardware failure, app outage, customer complaint
-  about access (without private personal details).
-- private: Route to specific owner only. Confidential customer/account discussion, pricing,
-  early-stage contracts, named individual issues, leadership-only context.
-- sensitive: Must NOT appear in any shared Slack. HR, legal, payroll, compensation,
-  medical/personal, employment, personnel, private contracts, security credentials
-  (passwords, API keys, tokens, OAuth), litigation, bank/payment changes, private
-  resident details (full name + unit + phone/email together), private security evidence.
+  genuinely confidential content. Includes: lockout reports, hardware/device failures, app
+  or connectivity outages, customer support requests that include standard contact details
+  (name, email, unit number, address). All of these are routine operations and safe to share
+  internally.
+
+- private: Route to a specific owner only. Confidential account or contract discussion,
+  pricing negotiation, early-stage business context, escalation involving leadership-only
+  information, named individual issue that goes beyond a standard support request
+  (e.g., billing dispute, account contract renegotiation).
+
+- sensitive: Must NOT appear in any shared Slack. Reserve sensitive ONLY for emails that
+  contain one or more of the following:
+  • HR matter: employee complaint, performance, termination, hiring, HR dispute
+  • Harassment or discrimination allegation
+  • Legal dispute, litigation, legal threat, or attorney communication
+  • Payroll, compensation, salary, or bonus discussion
+  • Medical or personal health information
+  • Banking or payment method change (account numbers, routing numbers, card details)
+  • Security credentials: passwords, API keys, OAuth tokens, private access codes, secrets
+  • Private security evidence: full raw access logs, surveillance footage requests/details
+  • Employment or personnel matter about a specific staff member
+
+  Do NOT mark sensitive just because an email includes a resident's name, unit number,
+  and email address alongside a lock/app/access support request. That is routine support
+  context, not sensitive data.
 
 CRITICAL: Sensitivity overrides urgency. An email can be both urgent and sensitive.
 When it is, do NOT route to shared Slack. Route to private_owner or manual_review.
 
 ## Step 9 — Sensitivity safety gate
 
-Before allowing shared_slack_allowed=true, check for:
-HR, legal, payroll, compensation, employee complaint, harassment, medical/personal details,
-private contract discussion, pricing negotiation, API keys, passwords, OAuth tokens,
-bank/payment changes, private security evidence, full resident personal details
-(unit number + full name + phone/email together), private access logs.
+Before blocking Slack (setting shared_slack_allowed=false), confirm the email contains
+GENUINELY sensitive content — not just standard resident/customer contact info.
 
-If any appear: shared_slack_allowed=false, private_route_required=true.
+Block Slack (shared_slack_allowed=false, private_route_required=true) ONLY when one or
+more of the following is clearly present:
+• HR matter, employee complaint, harassment or discrimination allegation
+• Legal dispute, litigation, or legal threat
+• Payroll, compensation, salary, or bonus discussion
+• Medical information or personal health details
+• Banking or payment method change (account numbers, routing, card details)
+• Security credentials: passwords, API keys, OAuth tokens, access codes, secrets
+• Private security evidence: full raw access logs, surveillance details
+• Employment or personnel matter about a specific staff member
+
+Do NOT block Slack just because the email contains:
+• Resident name, email address, unit number, or property address in a support request
+• Lock, app, access, or connectivity issue details with customer context
+• A resident describing their own problem (this is expected support content)
+These are normal support details — route them to Slack normally if urgent.
+
+If a blocking condition above is present: shared_slack_allowed=false, private_route_required=true.
 Route to manual_review even if urgent.
 
 ## Step 10 — Owner buckets
@@ -334,6 +380,17 @@ Owner bucket examples:
 - any possible sensitive content but unclear → route_type=manual_review
 - if sensitivity_level is private or sensitive → shared_slack_allowed MUST be false
 - if route_type is slack_channel → sensitivity_level MUST be public_internal
+
+Routing examples for common support cases:
+  "Resident can't connect app to lock, battery at 58%, using PINs for days, includes name/email/unit"
+    → urgency=urgent, sensitivity=public_internal, owner=engineering, route=slack_channel
+    (standard support context — name/email/unit does NOT make this sensitive)
+  "Harassment complaint from resident about another resident"
+    → urgency=urgent, sensitivity=sensitive, route=manual_review
+  "Customer wants to change their bank account for payments"
+    → urgency=normal, sensitivity=sensitive, route=manual_review
+  "App button not working for resident at unit 4B"
+    → urgency=urgent, sensitivity=public_internal, owner=engineering, route=slack_channel
 
 ## Step 12 — Key team members
 If any of these names appear in context suggesting an active escalation,
