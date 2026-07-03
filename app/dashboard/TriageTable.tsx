@@ -5,6 +5,7 @@ import type { SerializedTriageItem } from "./types";
 import styles from "./dashboard.module.css";
 import { formatCategoryLabel } from "@/src/lib/formatCategory";
 import { formatTorontoDateTimeShort } from "@/src/lib/formatDate";
+import { deriveTriageDisplayState } from "@/src/lib/triageDisplayState";
 import DetailDrawer from "./DetailDrawer";
 
 interface Props {
@@ -199,61 +200,76 @@ export default function TriageTable({ items, onItemUpdated, onRefresh }: Props) 
                   {/* Actions */}
                   <td className={styles.actionsCell} onClick={e => e.stopPropagation()}>
                     <div className={styles.actionBtns}>
-                      {item.status !== "resolved" && item.status !== "archived" && (
-                        <>
-                          {item.status !== "assigned" && item.status !== "escalated" ? (
-                            <button
-                              className={`${styles.btn} ${styles.btnAssign}`}
-                              onClick={() => handleAssign(item.id)}
-                              disabled={isLoading}
-                            >
-                              Assign
-                            </button>
-                          ) : (
-                            <button
-                              className={`${styles.btn} ${styles.btnAssign}`}
-                              onClick={() => quickAction(item.id, "unassign")}
-                              disabled={isLoading}
-                            >
-                              Unassign
-                            </button>
-                          )}
-                          {item.status !== "escalated" && (
-                            <button
-                              className={`${styles.btn} ${styles.btnEscalate}`}
-                              onClick={() => quickAction(item.id, "escalate")}
-                              disabled={isLoading}
-                            >
-                              Escalate
-                            </button>
-                          )}
-                          <button
-                            className={`${styles.btn} ${styles.btnResolve}`}
-                            onClick={() => quickAction(item.id, "resolve")}
-                            disabled={isLoading}
-                          >
-                            Resolve
-                          </button>
-                        </>
-                      )}
-                      {item.status === "resolved" && (
-                        <button
-                          className={`${styles.btn} ${styles.btnReopen}`}
-                          onClick={() => quickAction(item.id, "reopen")}
-                          disabled={isLoading}
-                        >
-                          Reopen
-                        </button>
-                      )}
-                      {item.status !== "archived" && (
-                        <button
-                          className={`${styles.btn} ${styles.btnArchive}`}
-                          onClick={() => quickAction(item.id, "archive")}
-                          disabled={isLoading}
-                        >
-                          Archive
-                        </button>
-                      )}
+                      {(() => {
+                        const ds = deriveTriageDisplayState(item);
+                        return (
+                          <>
+                            {ds.isActive && (
+                              <>
+                                {ds.isAssigned ? (
+                                  <button
+                                    className={`${styles.btn} ${styles.btnAssign}`}
+                                    onClick={() => quickAction(item.id, "unassign")}
+                                    disabled={isLoading}
+                                  >
+                                    Unassign
+                                  </button>
+                                ) : (
+                                  <button
+                                    className={`${styles.btn} ${styles.btnAssign}`}
+                                    onClick={() => handleAssign(item.id)}
+                                    disabled={isLoading}
+                                  >
+                                    Assign
+                                  </button>
+                                )}
+                                {ds.isEscalated ? (
+                                  <button
+                                    className={`${styles.btn} ${styles.btnUnescalate}`}
+                                    onClick={() => quickAction(item.id, "unescalate")}
+                                    disabled={isLoading}
+                                  >
+                                    Unescalate
+                                  </button>
+                                ) : (
+                                  <button
+                                    className={`${styles.btn} ${styles.btnEscalate}`}
+                                    onClick={() => quickAction(item.id, "escalate")}
+                                    disabled={isLoading}
+                                  >
+                                    Escalate
+                                  </button>
+                                )}
+                                <button
+                                  className={`${styles.btn} ${styles.btnResolve}`}
+                                  onClick={() => quickAction(item.id, "resolve")}
+                                  disabled={isLoading}
+                                >
+                                  Resolve
+                                </button>
+                              </>
+                            )}
+                            {ds.isResolved && (
+                              <button
+                                className={`${styles.btn} ${styles.btnReopen}`}
+                                onClick={() => quickAction(item.id, "reopen")}
+                                disabled={isLoading}
+                              >
+                                Reopen
+                              </button>
+                            )}
+                            {!ds.isArchived && (
+                              <button
+                                className={`${styles.btn} ${styles.btnArchive}`}
+                                onClick={() => quickAction(item.id, "archive")}
+                                disabled={isLoading}
+                              >
+                                Archive
+                              </button>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                     {errors[item.id] && (
                       <div className={styles.actionError}>{errors[item.id]}</div>

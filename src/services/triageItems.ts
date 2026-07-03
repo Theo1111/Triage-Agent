@@ -134,16 +134,26 @@ export async function unassignTriageItem(
 ): Promise<{ item: TriageItem; ownershipError: string | null }> {
   const existing = await triageRepo.findById(triageItemId);
   if (!existing) throw new Error(`Triage item not found: ${triageItemId}`);
-  if (existing.status !== "assigned") {
-    throw new Error(`Cannot unassign a triage item that is not assigned: ${triageItemId}`);
-  }
-  // Ownership check: compare canonical identities so dashboard and Slack names match.
-  if (canonicalOperator(existing.owner) !== canonicalOperator(requestingUsername)) {
-    return { item: existing, ownershipError: "Only the assigned owner can unassign this item." };
+  // Guard on owner/assigned_at — escalated items can still have an owner assigned.
+  // Checking status === "assigned" was wrong: escalated items have status "escalated"
+  // even when they carry an owner.
+  if (!existing.owner && !existing.assigned_at) {
+    throw new Error(`Item is already unassigned: ${triageItemId}`);
   }
   const item = await triageRepo.unassignItem(triageItemId);
   console.log(`[triage] unassigned item=${triageItemId} by=${requestingUsername}`);
   return { item, ownershipError: null };
+}
+
+export async function unescalateTriageItem(triageItemId: string): Promise<TriageItem> {
+  const item = await triageRepo.findById(triageItemId);
+  if (!item) throw new Error(`Triage item not found: ${triageItemId}`);
+  if (!item.escalated_at && item.status !== "escalated") {
+    throw new Error(`Triage item is not escalated: ${triageItemId}`);
+  }
+  const updated = await triageRepo.unescalateItem(triageItemId);
+  console.log(`[triage] unescalated item=${triageItemId}`);
+  return updated;
 }
 
 export async function reopenTriageItem(triageItemId: string): Promise<TriageItem> {

@@ -97,14 +97,19 @@ export async function findOpen(limit = 50): Promise<TriageItem[]> {
   );
 }
 
-// Used for assign: updates owner, status, and sets assigned_at = now().
+// Used for assign: updates owner and sets assigned_at.
+// Preserves "escalated" status when the item is currently escalated — escalation
+// and assignment are tracked independently via escalated_at and owner/assigned_at.
 export async function assignItem(
   id: string,
   owner: string
 ): Promise<TriageItem> {
   const row = await queryOne<TriageItem>(
     `UPDATE triage_items
-     SET owner = $2, status = 'assigned', assigned_at = now(), updated_at = now()
+     SET owner       = $2,
+         assigned_at = now(),
+         status      = CASE WHEN escalated_at IS NOT NULL THEN 'escalated' ELSE 'assigned' END,
+         updated_at  = now()
      WHERE id = $1
      RETURNING *`,
     [id, owner]
@@ -113,14 +118,30 @@ export async function assignItem(
   return row;
 }
 
-// Unassign: clears owner + assigned_at, resets status to "new".
+// Unassign: clears owner + assigned_at.
+// Restores "escalated" status when the item is still escalated, otherwise "new".
 export async function unassignItem(id: string): Promise<TriageItem> {
   const row = await queryOne<TriageItem>(
     `UPDATE triage_items
      SET owner       = NULL,
          assigned_at = NULL,
-         status      = 'new',
+         status      = CASE WHEN escalated_at IS NOT NULL THEN 'escalated' ELSE 'new' END,
          updated_at  = now()
+     WHERE id = $1
+     RETURNING *`,
+    [id]
+  );
+  if (!row) throw new Error(`Triage item not found: ${id}`);
+  return row;
+}
+
+// Unescalate: clears escalated_at and restores status based on whether an owner is set.
+export async function unescalateItem(id: string): Promise<TriageItem> {
+  const row = await queryOne<TriageItem>(
+    `UPDATE triage_items
+     SET escalated_at = NULL,
+         status       = CASE WHEN owner IS NOT NULL THEN 'assigned' ELSE 'new' END,
+         updated_at   = now()
      WHERE id = $1
      RETURNING *`,
     [id]

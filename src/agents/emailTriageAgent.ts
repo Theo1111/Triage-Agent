@@ -331,15 +331,40 @@ Route to manual_review even if urgent.
 
 ## Step 10 — Owner buckets
 
-- operations: resident lockouts, building ops coordination, unclear operational blockers,
-  resident/visitor experience issues NOT caused by a system failure
+CRITICAL ROUTING RULE — customer troubleshooting vs system failure:
+• Customer/resident reports a personal issue and asks for help → customer_success
+• Internal team identifies or suspects a confirmed system/backend failure → engineering
 
-- engineering: access-control system not working (fob/card/credential not functioning,
-  reader down, panel/relay/controller issue, ICT or intercom system failure, permissions
-  not applying in the system), app or admin portal down, API/webhook/database issue,
-  integration broken, residents or staff blocked because a system is not functioning,
-  anything requiring investigation of software, configuration, access logic, or backend
-  systems, Speer or engineering team mentions
+Do NOT route to engineering just because the email mentions app, lock, fob, access,
+battery, Bluetooth, or connectivity. Ask: has anyone confirmed a system problem, or is
+a customer just asking for troubleshooting help?
+
+- customer_success: A customer or resident is asking for help, troubleshooting, or a
+  status update and no system failure has been confirmed yet. Use this when:
+  • Customer/resident says they cannot connect app to lock / cannot open door
+  • Customer asks whether an update may have caused their issue
+  • Customer reports a self-reported, user-specific experience ("my app", "my lock", "we can't")
+  • Troubleshooting has not started and no root cause has been identified
+  • Customer asks "is this normal?", "can you help?", "what should I do?"
+  • Issue may be user setup, Bluetooth, phone permissions, battery, device pairing, or usage
+  • Customer is frustrated, needs a response, or is threatening to escalate
+  • Customer is angry, escalating, or threatening to cancel
+  • Repeated support complaints from the same customer
+
+- operations: resident lockouts, building ops coordination, unclear operational blockers,
+  resident/visitor experience issues NOT caused by a confirmed system failure
+
+- engineering: Use ONLY when a system-level failure has been confirmed or is clearly
+  suspected based on evidence in the email. Indicators:
+  • Internal team has diagnosed a technical or backend issue
+  • Access permissions are not applying after correct setup (not just a customer complaint)
+  • Multiple residents or a whole building is affected (not one user's personal issue)
+  • System outage is confirmed or strongly suspected
+  • App/admin portal/API/webhook/database/integration appears broken at a system level
+  • ICT, intercom, access-control system, or backend integration is failing
+  • Fobs/cards are created correctly in the system but the access-control hardware is rejecting them
+  • Explicit engineering request: "Speer eng", "engineering", "API issue", "backend", "portal down"
+  Do NOT use engineering for: a single customer asking "my app won't connect to my lock."
 
 - field_ops: ONLY physical on-site logistics and hands-on tasks — delivering or bringing
   hardware to a site, missing keys, dropping off fobs/panels/locks, picking up equipment,
@@ -351,23 +376,34 @@ Route to manual_review even if urgent.
   Do NOT assign field_ops just because the email mentions a door, fob, lock, reader,
   intercom, or building. Physical device name ≠ physical task.
 
-- customer_success: customer angry, client asking for update, escalation threat,
-  cancellation risk, repeated account complaints
-
 - manual_review: sensitive/private, unclear safety, HR/legal/payroll/credentials,
   no safe shared Slack summary, low confidence on urgent item
 
 - ignore: not_relevant with high confidence
 
-Owner bucket examples:
+Owner bucket examples — customer_success vs engineering:
+  "I can't connect my Grata app to my lock, using PINs, battery 58%, did an update cause this?"
+                                                → customer_success (customer asking for help, no system failure confirmed)
+  "My husband and I have had zero success connecting to the lock for days"
+                                                → customer_success (user-specific, troubleshooting not done)
+  "Can someone help me troubleshoot? My key fob doesn't work for my unit"
+                                                → customer_success (troubleshooting request, no system diagnosis)
+  "I am having trouble opening my door, what should I do?"
+                                                → customer_success (customer asking for help)
+  "GX saved the fobs but they still don't work for any resident"
+                                                → engineering  (system configured correctly, hardware failing)
+  "Access permissions are not applying after setup"
+                                                → engineering  (configuration/system issue confirmed)
+  "The admin portal is down"                   → engineering  (system failure confirmed)
+  "Residents across the building cannot unlock" → engineering  (building-wide, likely system issue)
+  "Looks like an IP change or integration issue"→ engineering  (internal technical diagnosis)
+  "Engineering needs to investigate"            → engineering  (explicit engineering request)
   "ICT fobs not working for bike room"          → engineering  (system failure, not delivery)
-  "Front door reader is down"                   → engineering  (system failure)
-  "Residents can't unlock door in the app"      → engineering  (app/access system failure)
-  "Access permissions not applying"             → engineering  (configuration/system issue)
+  "Front door reader is down"                   → engineering  (system failure confirmed)
   "Speer eng needs to look at this"             → engineering  (engineering team mention)
+  "Customer is threatening to cancel"           → customer_success (escalation)
   "Can you bring 20 locks to the site tomorrow" → field_ops    (physical delivery task)
   "We need someone to install hardware on-site" → field_ops    (physical install task)
-  "Drop off fobs at 123 Main St"                → field_ops    (physical delivery)
 
 ## Step 11 — Routing rules
 - urgent + public_internal → route_type=slack_channel, shared_slack_allowed=true
@@ -383,14 +419,18 @@ Owner bucket examples:
 
 Routing examples for common support cases:
   "Resident can't connect app to lock, battery at 58%, using PINs for days, includes name/email/unit"
+    → urgency=urgent, sensitivity=public_internal, owner=customer_success, route=slack_channel
+    (customer asking for help, no system failure confirmed; name/email/unit is normal support context)
+  "App button not working for resident at unit 4B, asks if something changed"
+    → urgency=urgent, sensitivity=public_internal, owner=customer_success, route=slack_channel
+    (user-specific, troubleshooting not done yet)
+  "All residents in building cannot unlock, fobs created in GX but not working"
     → urgency=urgent, sensitivity=public_internal, owner=engineering, route=slack_channel
-    (standard support context — name/email/unit does NOT make this sensitive)
+    (building-wide confirmed system failure)
   "Harassment complaint from resident about another resident"
     → urgency=urgent, sensitivity=sensitive, route=manual_review
   "Customer wants to change their bank account for payments"
     → urgency=normal, sensitivity=sensitive, route=manual_review
-  "App button not working for resident at unit 4B"
-    → urgency=urgent, sensitivity=public_internal, owner=engineering, route=slack_channel
 
 ## Step 12 — Key team members
 If any of these names appear in context suggesting an active escalation,

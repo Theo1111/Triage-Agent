@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { unassignTriageItem } from "@/src/services/triageItems";
+import { unescalateTriageItem } from "@/src/services/triageItems";
 import { logEvent } from "@/src/services/agentAuditLog";
 import { syncTriageItemToSlack } from "@/src/lib/slack/syncTriageToSlack";
 import { getOperatorFromRequest } from "@/src/lib/dashboardOperatorSession";
@@ -19,29 +19,18 @@ export async function POST(req: NextRequest) {
     }
 
     const actorLabel = operator.displayName ?? operator.username;
-
-    let item;
-    try {
-      const result = await unassignTriageItem(triageItemId, operator.username);
-      item = result.item;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      if (msg.includes("already unassigned")) {
-        return NextResponse.json({ success: false, error: "Item is already unassigned." }, { status: 409 });
-      }
-      throw err;
-    }
+    const item = await unescalateTriageItem(triageItemId);
 
     await logEvent({
       inboundEmailId: item.inbound_email_id,
-      eventType: "dashboard_item_unassigned",
+      eventType: "dashboard_item_unescalated",
       actorType: "human",
       actorId: operator.username,
-      action: `Unassigned triage item ${triageItemId} by ${actorLabel} via dashboard`,
-      afterState: { owner: null },
+      action: `Unescalated triage item ${triageItemId} by ${actorLabel} via dashboard`,
+      afterState: { status: item.status, escalated_at: null },
     });
 
-    await syncTriageItemToSlack(item, `🆕 *Status:* Unassigned by ${actorLabel} (via dashboard)`);
+    await syncTriageItemToSlack(item, `↘️ *Status:* Escalation cleared by ${actorLabel} (via dashboard)`);
     return NextResponse.json({ success: true, triageItem: item });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";

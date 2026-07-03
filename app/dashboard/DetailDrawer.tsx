@@ -5,6 +5,7 @@ import type { SerializedTriageItem } from "./types";
 import styles from "./dashboard.module.css";
 import { formatCategoryLabel } from "@/src/lib/formatCategory";
 import { formatTorontoDateTime } from "@/src/lib/formatDate";
+import { deriveTriageDisplayState } from "@/src/lib/triageDisplayState";
 
 interface Props {
   item: SerializedTriageItem | null;
@@ -86,9 +87,8 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
     setSummaryInput("");
   }
 
-  const busy      = loading !== null;
-  const isActive  = item.status !== "resolved" && item.status !== "archived";
-  const isAssigned = item.status === "assigned" || item.status === "escalated";
+  const busy = loading !== null;
+  const { isAssigned, isEscalated, isActive, isResolved, isArchived } = deriveTriageDisplayState(item);
 
   return (
     <>
@@ -108,19 +108,24 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
         <div className={styles.drawerActions}>
           {isActive && (
             <>
-              <button
-                className={`${styles.drawerBtn} ${styles.drawerBtnPrimary}`}
-                onClick={handleAssign}
-                disabled={busy}
-              >
-                {loading === "assign" ? "…" : "✅ Assign"}
-              </button>
-              {isAssigned && (
+              {isAssigned ? (
                 <button className={styles.drawerBtn} onClick={() => handleAction("unassign")} disabled={busy}>
                   {loading === "unassign" ? "…" : "↩️ Unassign"}
                 </button>
+              ) : (
+                <button
+                  className={`${styles.drawerBtn} ${styles.drawerBtnPrimary}`}
+                  onClick={handleAssign}
+                  disabled={busy}
+                >
+                  {loading === "assign" ? "…" : "✅ Assign"}
+                </button>
               )}
-              {!isAssigned && (
+              {isEscalated ? (
+                <button className={styles.drawerBtn} onClick={() => handleAction("unescalate")} disabled={busy}>
+                  {loading === "unescalate" ? "…" : "↘️ Unescalate"}
+                </button>
+              ) : (
                 <button className={styles.drawerBtn} onClick={() => handleAction("escalate")} disabled={busy}>
                   {loading === "escalate" ? "…" : "🔺 Escalate"}
                 </button>
@@ -130,12 +135,12 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
               </button>
             </>
           )}
-          {item.status === "resolved" && (
+          {isResolved && (
             <button className={styles.drawerBtn} onClick={() => handleAction("reopen")} disabled={busy}>
               {loading === "reopen" ? "…" : "🔄 Reopen"}
             </button>
           )}
-          {item.status !== "archived" && (
+          {!isArchived && (
             <button className={`${styles.drawerBtn} ${styles.drawerBtnDanger}`} onClick={() => handleAction("archive")} disabled={busy}>
               {loading === "archive" ? "…" : "🗄️ Archive"}
             </button>
