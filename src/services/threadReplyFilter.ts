@@ -208,6 +208,69 @@ export function checkIsClosureReply(strippedBody: string): boolean {
   return CLOSURE_PHRASES.some(p => p.test(strippedBody));
 }
 
+// ─── External customer reply classification ───────────────────────────────────
+// These run on external (non-Grata) senders who reply to a tracked open thread.
+// The patterns are intentionally broad — we want to err on the side of treating
+// a reply as meaningful rather than silently discarding it.
+
+const CUSTOMER_ESCALATION_SIGNALS: RegExp[] = [
+  /\beta\b/i,                                              // "any ETA", "what's the ETA"
+  /when (will|can|is|are) (this|it|the|they|you)/i,
+  /how (long|soon)/i,
+  /still (not |)(working|fixed|resolved|down|broken|open|waiting|happening|an issue)/i,
+  /still (no (update|response|fix|resolution|answer))/i,
+  /hasn'?t (been fixed|been resolved|worked|changed)/i,
+  /have(n'?t| not) (heard|received|gotten|got) (back|a response|an update|anything)/i,
+  /bypass(ed|ing)?/i,
+  /workaround/i,
+  /override[ds]?/i,
+  /security (concern|risk|issue|problem)/i,
+  /access (concern|risk|issue|problem)/i,
+  /open (to all|for everyone|unrestricted)/i,
+  /all (residents?|tenants?|floors?|units?|people|occupants?)/i,
+  /everyone (can'?t|cannot|is|has|affected)/i,
+  /escalat(e|ed|ing)/i,
+  /urgent(ly)?/i,
+  /\basap\b/i,
+  /immediately/i,
+  /right (now|away)/i,
+  /getting worse/i,
+  /more (people|residents?|tenants?) (are |)affected/i,
+  /no (one|one has) (responded?|replied?|followed? up|looked? into)/i,
+  /need (an |a )?(update|response|answer|fix|resolution|help)/i,
+  /any (update|news|word|progress|response|fix)\??/i,
+  /can you (please )?(update|provide|let us know|give us|advise)/i,
+];
+
+// Short, clearly-meaningless replies from external senders that don't warrant a
+// Slack notification or any update to the existing triage item.
+const EXTERNAL_NOISE_PATTERNS: RegExp[] = [
+  /^thank(s| you)[!.,]?\s*$/i,
+  /^(thanks|thank you) (so much|very much|a lot)[!.]?\s*$/i,
+  /^(ok|okay|got it|noted|sounds good|perfect|great|wonderful)[!.]?\s*$/i,
+  /^(acknowledged|confirmed|understood|received)[!.]?\s*$/i,
+  /^(received,? )?thank(s| you)[!.,]?\s*$/i,
+  /^appreciate (it|that|your (help|response|quick response|time))[!.]?\s*$/i,
+  /^(have a (great|good|nice) (day|weekend|evening)|take care)[!.]?\s*$/i,
+];
+
+// Returns true if the new reply body signals escalation — ETA demands, workarounds,
+// broader impact, security risk, etc. Run this on extractNewReplyBody output.
+export function checkIsCustomerEscalation(strippedBody: string): boolean {
+  if (!strippedBody.trim()) return false;
+  return CUSTOMER_ESCALATION_SIGNALS.some(p => p.test(strippedBody));
+}
+
+// Returns true for very short, clearly meaningless external replies that should be
+// silently discarded without any Slack notification. Only matches unambiguous noise
+// (capped at 150 chars to avoid false-positives on longer messages).
+export function checkIsNoisyExternalReply(strippedBody: string): boolean {
+  const trimmed = strippedBody.trim();
+  if (!trimmed) return true;
+  if (trimmed.length > 150) return false;
+  return EXTERNAL_NOISE_PATTERNS.some(p => p.test(trimmed));
+}
+
 // ─── Message kind ─────────────────────────────────────────────────────────────
 
 export type MessageKind =
@@ -217,6 +280,8 @@ export type MessageKind =
   | "internal_escalation"
   | "external_customer_update"
   | "external_escalation"
+  | "customer_update"
+  | "customer_escalation"
   | "reporter_confirmed_resolved"
   | "unknown_reply";
 

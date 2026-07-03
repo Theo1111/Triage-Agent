@@ -317,6 +317,69 @@ export function buildSlackUpdateBlocks(
   return { text: fallbackText, blocks };
 }
 
+// ─── Customer update message builder ─────────────────────────────────────────
+// Used when an external customer/reporter replies to an existing tracked thread.
+// Deliberately compact — does NOT look like a new issue alert.
+
+export function buildSlackCustomerUpdateMessage(opts: {
+  existingTriageItem: TriageItem;
+  replyEmailId: string;
+  senderDisplay: string;
+  replyBodyPreview: string;
+  isEscalation: boolean;
+}): SlackPayload {
+  const { existingTriageItem, replyEmailId, senderDisplay, replyBodyPreview, isEscalation } = opts;
+
+  const subject = existingTriageItem.subject ?? "(no subject)";
+  const emoji = isEscalation ? "⚠️" : "🔄";
+  const label = isEscalation ? "Escalation update on existing issue" : "Update on existing issue";
+  const statusLine = isEscalation
+    ? "⚠️ *Status:* Still open · Escalated"
+    : "🔄 *Status:* Still open";
+
+  const preview = replyBodyPreview.length > 400
+    ? replyBodyPreview.slice(0, 400) + "…"
+    : replyBodyPreview;
+
+  const appBaseUrl = process.env.APP_BASE_URL?.replace(/\/$/, "");
+  const viewEmailUrl = appBaseUrl ? `${appBaseUrl}/emails/${replyEmailId}` : null;
+
+  const fallbackText = `${emoji} ${label}: ${subject} — ${senderDisplay}`;
+
+  const bodySection = [
+    `${emoji} *${label}: ${subject}*`,
+    `*${senderDisplay}* added:`,
+    `>>> ${preview.replace(/\n+/g, "\n")}`,
+    statusLine,
+  ].join("\n");
+
+  const blocks: unknown[] = [
+    { type: "section", text: { type: "mrkdwn", text: bodySection } },
+  ];
+
+  const actionElements: unknown[] = [];
+  if (viewEmailUrl) {
+    actionElements.push({
+      type: "button",
+      text: { type: "plain_text", text: "📬 View Thread", emoji: true },
+      url: viewEmailUrl,
+    });
+  }
+  if (existingTriageItem.id) {
+    actionElements.push({
+      type: "button",
+      text: { type: "plain_text", text: "🟢 Mark Resolved", emoji: true },
+      action_id: "triage_resolve",
+      value: existingTriageItem.id,
+    });
+  }
+  if (actionElements.length > 0) {
+    blocks.push({ type: "actions", elements: actionElements });
+  }
+
+  return { text: fallbackText, blocks };
+}
+
 // ─── Webhook sender ──────────────────────────────────────────────────────────
 
 async function sendToWebhook(payload: SlackPayload): Promise<{ status: number; body: string }> {
@@ -336,6 +399,19 @@ async function sendToWebhook(payload: SlackPayload): Promise<{ status: number; b
 
   const body = await res.text();
   return { status: res.status, body };
+}
+
+// Public helper — posts any pre-built payload via the Incoming Webhook.
+// Used for customer update notifications that don't go through the full routing pipeline.
+export async function sendViaWebhook(payload: SlackPayload): Promise<void> {
+  try {
+    const result = await sendToWebhook(payload);
+    if (result.status !== 200 || result.body !== "ok") {
+      console.error(`[slack] webhook update returned status=${result.status} body=${result.body}`);
+    }
+  } catch (err) {
+    console.error("[slack] webhook update failed:", err);
+  }
 }
 
 // ─── Orchestration ───────────────────────────────────────────────────────────

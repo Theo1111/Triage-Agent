@@ -181,6 +181,17 @@ export async function archiveItem(id: string, archivedBy: string): Promise<Triag
   return row;
 }
 
+// Touch updated_at — used when a customer reply is linked to an existing issue
+// without any status change (the reply is informational rather than escalating).
+export async function touchUpdatedAt(id: string): Promise<TriageItem> {
+  const row = await queryOne<TriageItem>(
+    `UPDATE triage_items SET updated_at = now() WHERE id = $1 RETURNING *`,
+    [id]
+  );
+  if (!row) throw new Error(`Triage item not found: ${id}`);
+  return row;
+}
+
 // Patch a subset of mutable triage fields. Only non-null values in the input are updated.
 export async function updateFields(
   id: string,

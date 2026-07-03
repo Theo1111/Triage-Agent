@@ -183,6 +183,10 @@ export async function archiveTriageItem(
   return updated;
 }
 
+export async function touchTriageItem(triageItemId: string): Promise<TriageItem> {
+  return triageRepo.touchUpdatedAt(triageItemId);
+}
+
 export async function updateTriageFields(
   triageItemId: string,
   fields: { owner?: string | null; summary?: string | null; recommendedNextStep?: string | null }
