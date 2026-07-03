@@ -168,6 +168,20 @@ export async function reopenTriageItem(triageItemId: string): Promise<TriageItem
   return updated;
 }
 
+// Reopen a resolved triage item as escalated when a customer reply signals the
+// issue has recurred. Preserves created_at, inbound_email_id, and Slack refs.
+export async function reopenResolvedTriageItemAsEscalated(triageItemId: string): Promise<TriageItem> {
+  const item = await triageRepo.findById(triageItemId);
+  if (!item) throw new Error(`Triage item not found: ${triageItemId}`);
+  if (item.status !== "resolved") {
+    throw new Error(`reopen_not_resolved: Item ${triageItemId} is not resolved (status=${item.status})`);
+  }
+
+  const updated = await triageRepo.reopenResolvedAsEscalated(triageItemId);
+  console.log(`[triage] reopened-as-escalated item=${triageItemId}`);
+  return updated;
+}
+
 export async function archiveTriageItem(
   triageItemId: string,
   archivedBy: string,

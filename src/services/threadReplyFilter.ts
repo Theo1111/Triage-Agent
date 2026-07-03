@@ -277,6 +277,44 @@ export function checkIsClosureReply(strippedBody: string): boolean {
   return CLOSURE_PHRASES.some(p => p.test(strippedBody));
 }
 
+// ─── Reopen detection ────────────────────────────────────────────────────────
+// Phrases that indicate a customer is reporting the issue has recurred after
+// being marked resolved. Run this on extractNewReplyBody output.
+//
+// Only called when the existing triage item is already resolved, so "still not
+// working" is unambiguously a reopen signal (not an initial escalation).
+
+const REOPEN_PHRASES: RegExp[] = [
+  // "issue/problem is back", "it's back"
+  /(issue|problem).{0,20}(is |has )?(back|returned)/i,
+  /\bit'?s back\b/i,
+  // "same issue again", "same problem again"
+  /\bsame (issue|problem) again\b/i,
+  // "appearing again", "happening again", "occurring again"
+  /\b(appearing|happening|occurring|coming up) again\b/i,
+  // "not working again", "stopped working again", "broken again", "broke again", "down again"
+  /\b(not working|stopped working|broken|broke|offline|down|locked out) again\b/i,
+  // "still not working", "still broken", "still not fixed/resolved"
+  /\bstill (not working|not fixed|not resolved|broken|down|offline|locked out)\b/i,
+  // "problem came back", "came back"
+  /problem.{0,10}came back/i,
+  /\bcame back\b/i,
+  // "recurred", "reoccurred"
+  /\b(recurred?|reoccurred?)\b/i,
+  // "back to not working", "back to square one"
+  /back to (not working|being broken|square one)/i,
+  // "issue returned"
+  /issue.{0,10}returned/i,
+];
+
+// Returns true if the stripped reply body signals that a resolved issue has recurred.
+// Only call this when the linked triage item is already in "resolved" status — the
+// patterns are intentionally broad and would be false positives on open threads.
+export function checkIsReopenReply(strippedBody: string): boolean {
+  if (!strippedBody.trim()) return false;
+  return REOPEN_PHRASES.some(p => p.test(strippedBody));
+}
+
 // ─── External customer reply classification ───────────────────────────────────
 // These run on external (non-Grata) senders who reply to a tracked open thread.
 // The patterns are intentionally broad — we want to err on the side of treating
@@ -414,6 +452,7 @@ export type MessageKind =
   | "customer_update"
   | "customer_escalation"
   | "reporter_confirmed_resolved"
+  | "reporter_reopened_resolved"
   | "duplicate_thread_reply"
   | "unknown_reply";
 

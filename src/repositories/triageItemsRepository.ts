@@ -165,6 +165,24 @@ export async function reopenItem(id: string): Promise<TriageItem> {
   return row;
 }
 
+// Reopen a resolved item as escalated, triggered by a customer reply indicating
+// the issue has recurred. Clears resolved_at, sets escalated_at to now().
+// Preserves: created_at, inbound_email_id, slack_channel, slack_message_ts, owner.
+export async function reopenResolvedAsEscalated(id: string): Promise<TriageItem> {
+  const row = await queryOne<TriageItem>(
+    `UPDATE triage_items
+     SET status       = 'escalated',
+         resolved_at  = NULL,
+         escalated_at = now(),
+         updated_at   = now()
+     WHERE id = $1
+     RETURNING *`,
+    [id]
+  );
+  if (!row) throw new Error(`Triage item not found: ${id}`);
+  return row;
+}
+
 // Archive: sets status to "archived" and records who/when/why.
 export async function archiveItem(
   id: string,

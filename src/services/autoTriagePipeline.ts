@@ -10,12 +10,14 @@ import {
   resolveTriageItem,
   escalateTriageItem,
   touchTriageItem,
+  reopenResolvedTriageItemAsEscalated,
 } from "@/src/services/triageItems";
 import { logEvent } from "@/src/services/agentAuditLog";
 import {
   detectThreadContext,
   checkShouldSuppressReply,
   checkIsClosureReply,
+  checkIsReopenReply,
   checkIsCustomerEscalation,
   checkIsCustomerAcknowledgement,
   extractNewReplyBody,
@@ -157,6 +159,157 @@ export async function runAutoTriagePipeline(
         };
       }
     }
+  }
+
+  // ── 2.6. Resolved thread reopen detection ────────────────────────────────
+  // If a customer replies to a thread whose triage item is already RESOLVED,
+  // and their message signals the issue has recurred, reopen the item as escalated.
+  // Runs before step 2.7 (which only acts on open items) so resolved threads are
+  // handled here instead of falling through to AI classification and creating a
+  // duplicate triage item.
+  if (
+    threadCtx.isThreadReply &&
+    threadCtx.existingTriageItem &&
+    threadCtx.existingTriageItem.status === "resolved" &&
+    !isInternalSender
+  ) {
+    const replyBody = extractNewReplyBody(
+      cleanEmailBodyForTriage(email.body_text ?? email.snippet ?? "")
+    );
+    const senderDisplay = email.sender_name
+      ? `${email.sender_name} <${email.sender_email ?? "unknown"}>`
+      : (email.sender_email ?? "Unknown sender");
+
+    // Acknowledgements on resolved threads (e.g. "Thanks!") — suppress silently.
+    if (checkIsCustomerAcknowledgement(replyBody)) {
+      console.log(
+        `[auto-triage] customer_acknowledgement on resolved thread suppressed email=${inboundEmailId}` +
+        ` triage=${linkedTriageItemId} body="${replyBody.slice(0, 80)}"`
+      );
+      await logEvent({
+        inboundEmailId: email.id,
+        eventType: "reply_suppressed_customer_acknowledgement",
+        actorType: "system",
+        actorId: email.sender_email ?? "unknown",
+        action: "Customer acknowledgement on resolved thread — suppressed, no action",
+        reason: "customer_acknowledgement_on_resolved_thread",
+        metadata: {
+          gmail_message_id: email.gmail_message_id,
+          gmail_thread_id: email.gmail_thread_id,
+          linked_triage_item_id: linkedTriageItemId,
+          cleaned_reply_text: replyBody.slice(0, 200),
+          sender: email.sender_email,
+        },
+      });
+      return {
+        inboundEmailId,
+        skipped: true,
+        skipReason: "customer_acknowledgement",
+        classificationId: null,
+        triageItemId: linkedTriageItemId,
+        linkedTriageItemId,
+        messageKind: "customer_acknowledgement" as MessageKind,
+      };
+    }
+
+    if (checkIsReopenReply(replyBody)) {
+      console.log(
+        `[auto-triage] resolved_thread_reopened email=${inboundEmailId}` +
+        ` sender=${email.sender_email}` +
+        ` triage=${linkedTriageItemId}` +
+        ` body="${replyBody.slice(0, 120)}"`
+      );
+
+      // Reopen the resolved item as escalated.
+      let reopenedItem = threadCtx.existingTriageItem;
+      try {
+        reopenedItem = await reopenResolvedTriageItemAsEscalated(threadCtx.existingTriageItem.id);
+        console.log(`[auto-triage] triage item reopened as escalated triage=${reopenedItem.id}`);
+      } catch (err) {
+        console.warn(`[auto-triage] reopen failed (non-fatal):`, err);
+      }
+
+      // Slack: thread reply → card sync → webhook fallback.
+      const botToken = process.env.SLACK_BOT_TOKEN;
+      let slackUpdatePosted = false;
+
+      if (botToken && reopenedItem.slack_channel && reopenedItem.slack_message_ts) {
+        try {
+          const appBaseUrl = process.env.APP_BASE_URL?.replace(/\/$/, "");
+          const viewUrl = appBaseUrl ? `${appBaseUrl}/emails/${email.id}` : null;
+          const preview = replyBody.length > 300 ? replyBody.slice(0, 300) + "…" : replyBody;
+          const threadText = [
+            `🔄 *Reopened* — ${senderDisplay} replied that the issue is back`,
+            `>>> ${preview.replace(/\n+/g, "\n")}`,
+            viewUrl ? `<${viewUrl}|View Thread>` : null,
+          ].filter(Boolean).join("\n");
+
+          await postThreadReply(
+            botToken,
+            reopenedItem.slack_channel,
+            reopenedItem.slack_message_ts,
+            threadText
+          );
+          console.log(`[auto-triage] slack thread reply posted (reopen) triage=${reopenedItem.id}`);
+        } catch (err) {
+          console.warn(`[auto-triage] slack thread reply failed on reopen, falling back:`, err);
+        }
+      }
+
+      // Sync the card to show escalated status regardless of whether the thread reply succeeded.
+      if (reopenedItem.slack_channel && reopenedItem.slack_message_ts) {
+        await syncTriageItemToSlack(
+          reopenedItem,
+          `🔄 *Reopened* — ${senderDisplay} replied that the issue is recurring`
+        ).catch(err =>
+          console.warn(`[auto-triage] syncTriageItemToSlack failed on reopen (non-fatal):`, err)
+        );
+        slackUpdatePosted = true;
+      }
+
+      if (!slackUpdatePosted) {
+        // No Slack message ref — post a compact webhook update.
+        const updateMsg = buildSlackCustomerUpdateMessage({
+          existingTriageItem: reopenedItem,
+          replyEmailId: email.id,
+          senderDisplay,
+          replyBodyPreview: replyBody,
+          isEscalation: true,
+        });
+        await sendViaWebhook(updateMsg).catch(err =>
+          console.warn(`[auto-triage] webhook update failed on reopen (non-fatal):`, err)
+        );
+      }
+
+      await logEvent({
+        inboundEmailId: email.id,
+        eventType: "triage_reopened_from_customer_reply",
+        actorType: "system",
+        actorId: email.sender_email ?? "unknown",
+        action: "Resolved issue reopened from customer reply",
+        reason: "Reporter indicated issue is recurring",
+        metadata: {
+          gmail_message_id: email.gmail_message_id,
+          gmail_thread_id: email.gmail_thread_id,
+          linked_triage_item_id: linkedTriageItemId,
+          reply_body_preview: replyBody.slice(0, 200),
+          sender: email.sender_email,
+        },
+      });
+
+      return {
+        inboundEmailId,
+        skipped: true,
+        skipReason: "resolved_thread_reopened",
+        classificationId: null,
+        triageItemId: linkedTriageItemId,
+        linkedTriageItemId,
+        messageKind: "reporter_reopened_resolved" as MessageKind,
+      };
+    }
+
+    // Not an ack and not a reopen signal (e.g., a general question on a resolved thread).
+    // Fall through to AI classification which may create a new triage item if warranted.
   }
 
   // ── 2.7. External customer update on tracked open thread ──────────────────
