@@ -65,6 +65,7 @@ async function fetchAllItems(): Promise<SerializedTriageItem[]> {
      FROM triage_items ti
      LEFT JOIN email_classifications ec ON ec.id = ti.classification_id
      ORDER BY
+       CASE WHEN ti.escalated_at IS NOT NULL AND ti.status NOT IN ('resolved','archived','ignored') THEN 0 ELSE 1 END,
        CASE ti.urgency_level WHEN 'urgent' THEN 0 ELSE 1 END,
        ti.created_at DESC
      LIMIT 500`,

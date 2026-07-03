@@ -124,6 +124,17 @@ export async function countThreadSiblings(
   return Number(row?.count ?? 0);
 }
 
+// Find all emails in a Gmail thread, ordered chronologically oldest first.
+// Used by View Email thread display and auto-resolution logic.
+export async function findByThreadId(gmailThreadId: string): Promise<InboundEmail[]> {
+  return query<InboundEmail>(
+    `SELECT * FROM inbound_emails
+     WHERE gmail_thread_id = $1
+     ORDER BY COALESCE(received_at, created_at) ASC`,
+    [gmailThreadId]
+  );
+}
+
 export async function findAwaitingClassification(limit = 50): Promise<InboundEmail[]> {
   return query<InboundEmail>(
     `SELECT * FROM inbound_emails

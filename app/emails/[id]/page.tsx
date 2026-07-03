@@ -3,30 +3,11 @@ import Link from "next/link";
 import { queryOne } from "@/src/lib/db";
 import { formatCategoryLabel } from "@/src/lib/formatCategory";
 import { formatTorontoDateTime } from "@/src/lib/formatDate";
-import type { EmailClassification, TriageItem } from "@/src/types/database";
+import { deriveTriageDisplayState } from "@/src/lib/triageDisplayState";
+import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
+import type { InboundEmail, EmailClassification, TriageItem } from "@/src/types/database";
 
 export const dynamic = "force-dynamic";
-
-interface EmailDetail {
-  id: string;
-  source_inbox_email: string;
-  sender_email: string | null;
-  sender_name: string | null;
-  recipient_emails: string[] | null;
-  cc_emails: string[] | null;
-  subject: string | null;
-  snippet: string | null;
-  body_text: string | null;
-  body_html: string | null;
-  received_at: Date | null;
-  has_attachments: boolean;
-  attachment_count: number;
-  created_at: Date;
-}
-
-function fmt(d: Date | string | null | undefined): string {
-  return formatTorontoDateTime(d);
-}
 
 function urgencyColor(level: string): string {
   return level === "urgent" ? "#dc2626" : level === "normal" ? "#2563eb" : "#6b7280";
@@ -58,7 +39,6 @@ const pill = (text: string, color: string) => ({
   textTransform: "capitalize" as const,
 });
 
-// Strip HTML tags and decode common entities for plain-text fallback.
 function stripHtml(html: string): string {
   return html
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
@@ -77,6 +57,73 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+function resolveBody(email: InboundEmail): { text: string | null; isSnippetOnly: boolean } {
+  if (email.body_text?.trim()) return { text: email.body_text.trim(), isSnippetOnly: false };
+  if (email.body_html) return { text: stripHtml(email.body_html), isSnippetOnly: false };
+  if (email.snippet) return { text: email.snippet, isSnippetOnly: true };
+  return { text: null, isSnippetOnly: false };
+}
+
+const s = {
+  page: {
+    maxWidth: "860px", margin: "0 auto", padding: "32px 24px 80px",
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    fontSize: "14px", color: "#111827", background: "#f9fafb", minHeight: "100vh",
+  } as React.CSSProperties,
+  back: {
+    display: "inline-flex", alignItems: "center", gap: "4px",
+    fontSize: "13px", color: "#2563eb", textDecoration: "none",
+    marginBottom: "20px",
+  } as React.CSSProperties,
+  subject: { fontSize: "20px", fontWeight: 700, color: "#111827", margin: "0 0 6px" } as React.CSSProperties,
+  inboxLabel: { fontSize: "12px", color: "#6b7280", margin: "0 0 24px" } as React.CSSProperties,
+  card: {
+    background: "#fff", border: "1px solid #e5e7eb", borderRadius: "10px",
+    padding: "20px 24px", marginBottom: "16px",
+  } as React.CSSProperties,
+  cardHighlighted: {
+    background: "#fff", border: "2px solid #2563eb", borderRadius: "10px",
+    padding: "20px 24px", marginBottom: "16px",
+  } as React.CSSProperties,
+  cardTitle: {
+    fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em",
+    textTransform: "uppercase" as const, color: "#6b7280", margin: "0 0 14px",
+  },
+  triggerBadge: {
+    display: "inline-block", fontSize: "11px", fontWeight: 700,
+    background: "#dbeafe", color: "#1d4ed8", borderRadius: "8px",
+    padding: "2px 8px", marginLeft: "8px", verticalAlign: "middle",
+  } as React.CSSProperties,
+  row: { display: "flex", gap: "8px", marginBottom: "10px", alignItems: "flex-start" } as React.CSSProperties,
+  label: { fontSize: "13px", fontWeight: 600, color: "#374151", minWidth: "110px", flexShrink: 0 },
+  value: { fontSize: "13px", color: "#111827" },
+  bodyWrap: {
+    marginTop: "16px", padding: "16px 18px", background: "#f9fafb",
+    borderRadius: "6px", border: "1px solid #e5e7eb",
+  } as React.CSSProperties,
+  bodyText: {
+    margin: 0, fontSize: "13px", color: "#111827", lineHeight: "1.65",
+    whiteSpace: "pre-wrap", wordBreak: "break-word" as const,
+    fontFamily: "inherit",
+  } as React.CSSProperties,
+  snippetNote: {
+    fontSize: "11px", color: "#9ca3af", fontStyle: "italic", marginTop: "8px",
+  } as React.CSSProperties,
+  noData: { fontSize: "13px", color: "#9ca3af", fontStyle: "italic" },
+  threadNote: {
+    fontSize: "12px", color: "#9ca3af", fontStyle: "italic",
+    textAlign: "center" as const, padding: "12px 0",
+  } as React.CSSProperties,
+  sectionHeader: {
+    fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em",
+    textTransform: "uppercase" as const, color: "#9ca3af",
+    margin: "28px 0 12px", display: "flex", alignItems: "center", gap: "8px",
+  } as React.CSSProperties,
+  divider: {
+    flex: 1, height: "1px", background: "#e5e7eb",
+  } as React.CSSProperties,
+};
+
 export default async function EmailDetailPage({
   params,
 }: {
@@ -84,135 +131,106 @@ export default async function EmailDetailPage({
 }) {
   const { id } = await params;
 
-  const [email, classification, triageItem] = await Promise.all([
-    queryOne<EmailDetail>(
-      `SELECT id, source_inbox_email, sender_email, sender_name, recipient_emails, cc_emails,
-              subject, snippet, body_text, body_html,
-              received_at, has_attachments, attachment_count, created_at
-       FROM inbound_emails WHERE id = $1`,
-      [id]
-    ),
+  // Load the target email first.
+  const targetEmail = await inboundEmailsRepo.findById(id);
+  if (!targetEmail) notFound();
+
+  const gmailThreadId = targetEmail.gmail_thread_id;
+
+  // Fetch all emails in the thread (chronological), the triage item for the thread,
+  // and the classification for the target email.
+  const [threadEmails, triageItem, classification] = await Promise.all([
+    gmailThreadId
+      ? inboundEmailsRepo.findByThreadId(gmailThreadId)
+      : Promise.resolve([targetEmail]),
+    gmailThreadId
+      ? queryOne<TriageItem>(
+          `SELECT ti.* FROM triage_items ti
+           JOIN inbound_emails ie ON ie.id = ti.inbound_email_id
+           WHERE ie.gmail_thread_id = $1
+           ORDER BY ti.created_at ASC LIMIT 1`,
+          [gmailThreadId]
+        )
+      : queryOne<TriageItem>(
+          `SELECT * FROM triage_items WHERE inbound_email_id = $1 ORDER BY created_at DESC LIMIT 1`,
+          [id]
+        ),
     queryOne<EmailClassification>(
       `SELECT * FROM email_classifications
        WHERE inbound_email_id = $1 AND is_current = true
        ORDER BY created_at DESC LIMIT 1`,
       [id]
     ),
-    queryOne<TriageItem>(
-      `SELECT * FROM triage_items
-       WHERE inbound_email_id = $1
-       ORDER BY created_at DESC LIMIT 1`,
-      [id]
-    ),
   ]);
 
-  if (!email) notFound();
+  // If findByThreadId returned nothing (edge case), fall back to the target alone.
+  const messages = threadEmails.length > 0 ? threadEmails : [targetEmail];
+  const isSingleMessage = messages.length === 1;
 
-  const senderDisplay = email.sender_name
-    ? `${email.sender_name} <${email.sender_email ?? "unknown"}>`
-    : (email.sender_email ?? "Unknown sender");
-
-  const toDisplay = email.recipient_emails?.join(", ") ?? email.source_inbox_email;
-
-  // Resolve body: plain text first, HTML stripped to text second, snippet last.
-  const bodyText =
-    email.body_text?.trim() ||
-    (email.body_html ? stripHtml(email.body_html) : null) ||
-    email.snippet ||
-    null;
-
-  const isSnippetOnly = !email.body_text && !email.body_html && !!email.snippet;
-
-  const s = {
-    page: {
-      maxWidth: "860px", margin: "0 auto", padding: "32px 24px 80px",
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-      fontSize: "14px", color: "#111827", background: "#f9fafb", minHeight: "100vh",
-    } as React.CSSProperties,
-    back: {
-      display: "inline-flex", alignItems: "center", gap: "4px",
-      fontSize: "13px", color: "#2563eb", textDecoration: "none",
-      marginBottom: "20px",
-    } as React.CSSProperties,
-    subject: { fontSize: "20px", fontWeight: 700, color: "#111827", margin: "0 0 6px" } as React.CSSProperties,
-    inboxLabel: { fontSize: "12px", color: "#6b7280", margin: "0 0 24px" } as React.CSSProperties,
-    card: {
-      background: "#fff", border: "1px solid #e5e7eb", borderRadius: "10px",
-      padding: "20px 24px", marginBottom: "16px",
-    } as React.CSSProperties,
-    cardTitle: {
-      fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em",
-      textTransform: "uppercase" as const, color: "#6b7280", margin: "0 0 14px",
-    },
-    row: { display: "flex", gap: "8px", marginBottom: "10px", alignItems: "flex-start" } as React.CSSProperties,
-    label: { fontSize: "13px", fontWeight: 600, color: "#374151", minWidth: "110px", flexShrink: 0 },
-    value: { fontSize: "13px", color: "#111827" },
-    bodyWrap: {
-      marginTop: "16px", padding: "16px 18px", background: "#f9fafb",
-      borderRadius: "6px", border: "1px solid #e5e7eb",
-    } as React.CSSProperties,
-    bodyText: {
-      margin: 0, fontSize: "13px", color: "#111827", lineHeight: "1.65",
-      whiteSpace: "pre-wrap", wordBreak: "break-word" as const,
-      fontFamily: "inherit",
-    } as React.CSSProperties,
-    snippetNote: {
-      fontSize: "11px", color: "#9ca3af", fontStyle: "italic", marginTop: "8px",
-    } as React.CSSProperties,
-    noData: { fontSize: "13px", color: "#9ca3af", fontStyle: "italic" },
-  };
+  const displayState = triageItem ? deriveTriageDisplayState(triageItem) : null;
 
   return (
     <div style={s.page}>
       <Link href="/dashboard" style={s.back}>← Back to Dashboard</Link>
 
-      <h1 style={s.subject}>{email.subject ?? "(no subject)"}</h1>
-      <p style={s.inboxLabel}>Inbox: {email.source_inbox_email}</p>
+      <h1 style={s.subject}>{targetEmail.subject ?? "(no subject)"}</h1>
+      <p style={s.inboxLabel}>Inbox: {targetEmail.source_inbox_email}</p>
 
-      {/* Email metadata + body */}
-      <div style={s.card}>
-        <div style={s.cardTitle}>Email</div>
-        <div style={s.row}>
-          <span style={s.label}>From</span>
-          <span style={s.value}>{senderDisplay}</span>
-        </div>
-        <div style={s.row}>
-          <span style={s.label}>To</span>
-          <span style={s.value}>{toDisplay}</span>
-        </div>
-        {email.cc_emails && email.cc_emails.length > 0 && (
+      {/* ── Triage context (thread-level) ── */}
+      {triageItem ? (
+        <div style={s.card}>
+          <div style={s.cardTitle}>Triage</div>
           <div style={s.row}>
-            <span style={s.label}>CC</span>
-            <span style={s.value}>{email.cc_emails.join(", ")}</span>
-          </div>
-        )}
-        <div style={s.row}>
-          <span style={s.label}>Received</span>
-          <span style={s.value}>{fmt(email.received_at)}</span>
-        </div>
-        {email.has_attachments && (
-          <div style={s.row}>
-            <span style={s.label}>Attachments</span>
-            <span style={s.value}>{email.attachment_count}</span>
-          </div>
-        )}
-
-        {/* Full body */}
-        {bodyText ? (
-          <div style={s.bodyWrap}>
-            <pre style={s.bodyText}>{bodyText}</pre>
-            {isSnippetOnly && (
-              <p style={s.snippetNote}>
-                Full body not stored for this email — showing Gmail snippet only.
-              </p>
+            <span style={s.label}>Status</span>
+            <span style={pill(triageItem.status.replace(/_/g, " "), statusColor(triageItem.status))}>
+              {triageItem.status.replace(/_/g, " ")}
+            </span>
+            {displayState?.isEscalated && (
+              <span style={{ ...pill("escalated", "#d97706"), marginLeft: "6px" }}>escalated</span>
             )}
           </div>
-        ) : (
-          <p style={{ ...s.noData, marginTop: "12px" }}>No email body available.</p>
-        )}
-      </div>
+          <div style={s.row}>
+            <span style={s.label}>Owner</span>
+            <span style={s.value}>{triageItem.owner ?? "Unassigned"}</span>
+          </div>
+          <div style={s.row}>
+            <span style={s.label}>Urgency</span>
+            <span style={pill(triageItem.urgency_level ?? "unknown", urgencyColor(triageItem.urgency_level ?? "unknown"))}>
+              {triageItem.urgency_level ?? "unknown"}
+            </span>
+          </div>
+          <div style={s.row}>
+            <span style={s.label}>Created</span>
+            <span style={s.value}>{formatTorontoDateTime(triageItem.created_at)}</span>
+          </div>
+          {triageItem.assigned_at && (
+            <div style={s.row}>
+              <span style={s.label}>Assigned at</span>
+              <span style={s.value}>{formatTorontoDateTime(triageItem.assigned_at)}</span>
+            </div>
+          )}
+          {triageItem.escalated_at && (
+            <div style={s.row}>
+              <span style={s.label}>Escalated at</span>
+              <span style={s.value}>{formatTorontoDateTime(triageItem.escalated_at)}</span>
+            </div>
+          )}
+          {triageItem.resolved_at && (
+            <div style={s.row}>
+              <span style={s.label}>Resolved at</span>
+              <span style={s.value}>{formatTorontoDateTime(triageItem.resolved_at)}</span>
+            </div>
+          )}
 
-      {/* Classification */}
+        </div>
+      ) : (
+        <div style={s.card}>
+          <div style={s.cardTitle}>Triage</div>
+          <p style={s.noData}>No triage record for this thread.</p>
+        </div>
+      )}
+
+      {/* ── AI Classification (for the triage-triggering email) ── */}
       {classification ? (
         <div style={s.card}>
           <div style={s.cardTitle}>AI Classification</div>
@@ -258,48 +276,73 @@ export default async function EmailDetailPage({
         </div>
       )}
 
-      {/* Triage */}
-      {triageItem ? (
-        <div style={s.card}>
-          <div style={s.cardTitle}>Triage</div>
-          <div style={s.row}>
-            <span style={s.label}>Status</span>
-            <span style={pill(triageItem.status.replace(/_/g, " "), statusColor(triageItem.status))}>
-              {triageItem.status.replace(/_/g, " ")}
-            </span>
-          </div>
-          <div style={s.row}>
-            <span style={s.label}>Owner</span>
-            <span style={s.value}>{triageItem.owner ?? "Unassigned"}</span>
-          </div>
-          <div style={s.row}>
-            <span style={s.label}>Created</span>
-            <span style={s.value}>{fmt(triageItem.created_at)}</span>
-          </div>
-          {triageItem.assigned_at && (
-            <div style={s.row}>
-              <span style={s.label}>Assigned at</span>
-              <span style={s.value}>{fmt(triageItem.assigned_at)}</span>
+      {/* ── Thread messages ── */}
+      <div style={s.sectionHeader}>
+        <span>Email Thread</span>
+        <div style={s.divider} />
+        <span style={{ whiteSpace: "nowrap" }}>{messages.length} message{messages.length !== 1 ? "s" : ""}</span>
+      </div>
+
+      {messages.map((msg, idx) => {
+        const isTarget = msg.id === id;
+        const senderDisplay = msg.sender_name
+          ? `${msg.sender_name} <${msg.sender_email ?? "unknown"}>`
+          : (msg.sender_email ?? "Unknown sender");
+        const toDisplay = msg.recipient_emails?.join(", ") ?? msg.source_inbox_email;
+        const { text: bodyText, isSnippetOnly } = resolveBody(msg);
+
+        return (
+          <div key={msg.id} style={isTarget ? s.cardHighlighted : s.card}>
+            <div style={s.cardTitle}>
+              Message {idx + 1}
+              {isTarget && (
+                <span style={s.triggerBadge}>Triage-triggering message</span>
+              )}
             </div>
-          )}
-          {triageItem.resolved_at && (
+
             <div style={s.row}>
-              <span style={s.label}>Resolved at</span>
-              <span style={s.value}>{fmt(triageItem.resolved_at)}</span>
+              <span style={s.label}>From</span>
+              <span style={s.value}>{senderDisplay}</span>
             </div>
-          )}
-          {triageItem.escalated_at && (
             <div style={s.row}>
-              <span style={s.label}>Escalated at</span>
-              <span style={s.value}>{fmt(triageItem.escalated_at)}</span>
+              <span style={s.label}>To</span>
+              <span style={s.value}>{toDisplay}</span>
             </div>
-          )}
-        </div>
-      ) : (
-        <div style={s.card}>
-          <div style={s.cardTitle}>Triage</div>
-          <p style={s.noData}>No triage record for this email.</p>
-        </div>
+            {msg.cc_emails && msg.cc_emails.length > 0 && (
+              <div style={s.row}>
+                <span style={s.label}>CC</span>
+                <span style={s.value}>{msg.cc_emails.join(", ")}</span>
+              </div>
+            )}
+            <div style={s.row}>
+              <span style={s.label}>Received</span>
+              <span style={s.value}>{formatTorontoDateTime(msg.received_at)}</span>
+            </div>
+            {msg.has_attachments && (
+              <div style={s.row}>
+                <span style={s.label}>Attachments</span>
+                <span style={s.value}>{msg.attachment_count}</span>
+              </div>
+            )}
+
+            {bodyText ? (
+              <div style={s.bodyWrap}>
+                <pre style={s.bodyText}>{bodyText}</pre>
+                {isSnippetOnly && (
+                  <p style={s.snippetNote}>
+                    Full body not stored — showing Gmail snippet only.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p style={{ ...s.noData, marginTop: "12px" }}>No email body available.</p>
+            )}
+          </div>
+        );
+      })}
+
+      {isSingleMessage && (
+        <p style={s.threadNote}>No other stored messages found in this thread.</p>
       )}
     </div>
   );

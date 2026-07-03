@@ -172,6 +172,42 @@ function matchesCoordinationPattern(text: string): boolean {
   return INTERNAL_COORDINATION_PATTERNS.some(p => p.test(text));
 }
 
+// ─── Closure detection ───────────────────────────────────────────────────────
+// Phrases that indicate the original reporter is confirming the issue is fixed.
+
+const CLOSURE_PHRASES: RegExp[] = [
+  /working now/i,
+  /it'?s (now )?working/i,
+  /it is (now )?working/i,
+  /fixed( now)?/i,
+  /it'?s fixed/i,
+  /it is fixed/i,
+  /issue (is |has been )?resolved/i,
+  /\bresolved\b/i,
+  /all good( now)?/i,
+  /we'?re (all )?good/i,
+  /we are (all )?good/i,
+  /this is fixed/i,
+  /confirmed working/i,
+  /no longer (an )?issue/i,
+  /(you can |please )?close (this|the ticket|the issue)/i,
+  /we'?re all set/i,
+  /we are all set/i,
+  /problem (is |has been )?solved/i,
+  /seems (to be )?working/i,
+  /appears (to be )?working/i,
+  /back (to )?working/i,
+  /thanks.*working/i,
+  /thank you.*working/i,
+];
+
+// Returns true if the stripped reply body contains a closure/resolution phrase.
+// Run this on extractNewReplyBody output, not the raw body.
+export function checkIsClosureReply(strippedBody: string): boolean {
+  if (!strippedBody.trim()) return false;
+  return CLOSURE_PHRASES.some(p => p.test(strippedBody));
+}
+
 // ─── Message kind ─────────────────────────────────────────────────────────────
 
 export type MessageKind =
@@ -181,6 +217,7 @@ export type MessageKind =
   | "internal_escalation"
   | "external_customer_update"
   | "external_escalation"
+  | "reporter_confirmed_resolved"
   | "unknown_reply";
 
 // ─── Thread context detection ─────────────────────────────────────────────────

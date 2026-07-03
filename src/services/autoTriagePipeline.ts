@@ -1,14 +1,17 @@
 import { classifyEmailById } from "@/src/services/emailClassificationWorker";
 import { routeClassifiedEmail } from "@/src/services/slackAlerts";
 import { getCurrentClassification } from "@/src/services/classification";
-import { findByInboundEmailId } from "@/src/services/triageItems";
+import { findByInboundEmailId, resolveTriageItem } from "@/src/services/triageItems";
 import { logEvent } from "@/src/services/agentAuditLog";
 import {
   detectThreadContext,
   checkShouldSuppressReply,
+  checkIsClosureReply,
+  extractNewReplyBody,
   isInternalSenderEmail,
   type MessageKind,
 } from "@/src/services/threadReplyFilter";
+import { syncTriageItemToSlack } from "@/src/lib/slack/syncTriageToSlack";
 import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -71,6 +74,77 @@ export async function runAutoTriagePipeline(
   const threadCtx = await detectThreadContext(email);
   const linkedTriageItemId = threadCtx.existingTriageItem?.id ?? null;
   const isInternalSender = isInternalSenderEmail(email.sender_email ?? "");
+
+  // ── 2.5. Reporter closure detection ──────────────────────────────────────
+  // If the original reporter sends back a reply confirming the issue is fixed,
+  // auto-resolve the open triage item before any AI classification.
+  if (
+    threadCtx.isThreadReply &&
+    threadCtx.existingTriageItem &&
+    !["resolved", "archived"].includes(threadCtx.existingTriageItem.status)
+  ) {
+    const originalEmail = await inboundEmailsRepo.findById(
+      threadCtx.existingTriageItem.inbound_email_id
+    );
+    const originalReporter = originalEmail?.sender_email?.toLowerCase() ?? null;
+    const currentSender = (email.sender_email ?? "").toLowerCase();
+    const isOriginalReporter = originalReporter !== null && currentSender === originalReporter;
+
+    if (isOriginalReporter) {
+      const newReplyBody = extractNewReplyBody(email.body_text ?? email.snippet ?? "");
+
+      if (checkIsClosureReply(newReplyBody)) {
+        console.log(
+          `[auto-triage] reporter_closure detected email=${inboundEmailId}` +
+          ` sender=${email.sender_email}` +
+          ` triage=${linkedTriageItemId}` +
+          ` body="${newReplyBody.slice(0, 120)}"`
+        );
+
+        let resolvedItem = null;
+        try {
+          resolvedItem = await resolveTriageItem(threadCtx.existingTriageItem.id);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!msg.includes("already resolved")) throw err;
+          console.log(`[auto-triage] triage item already resolved — skipping auto-resolve`);
+        }
+
+        if (resolvedItem) {
+          await syncTriageItemToSlack(
+            resolvedItem,
+            `✅ *Resolved* — original reporter confirmed the issue is working. (${email.sender_email ?? "sender"})`
+          );
+        }
+
+        await logEvent({
+          inboundEmailId: email.id,
+          eventType: "auto_resolved_from_reporter_reply",
+          actorType: "system",
+          actorId: email.sender_email ?? "unknown",
+          action: "Original reporter confirmed issue is resolved — triage item auto-resolved",
+          reason: "reporter_confirmed_working",
+          metadata: {
+            gmail_message_id: email.gmail_message_id,
+            gmail_thread_id: email.gmail_thread_id,
+            linked_triage_item_id: linkedTriageItemId,
+            reply_body_preview: newReplyBody.slice(0, 200),
+            original_reporter: originalReporter,
+          },
+        });
+
+        return {
+          inboundEmailId,
+          skipped: true,
+          skipReason: "reporter_confirmed_resolved",
+          classificationId: null,
+          triageItemId: linkedTriageItemId,
+          linkedTriageItemId,
+          messageKind: "reporter_confirmed_resolved" as MessageKind,
+        };
+      }
+    }
+  }
 
   if (threadCtx.isThreadReply) {
     // ── 3. Heuristic pre-filter ─────────────────────────────────────────────
