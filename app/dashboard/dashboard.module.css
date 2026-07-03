@@ -605,6 +605,21 @@
   text-overflow: ellipsis;
 }
 
+.oauthWarning {
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #92400e;
+  margin-bottom: 8px;
+}
+.oauthWarningLink {
+  color: #92400e;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 .operatorBtn {
   font-size: 12px;
   font-weight: 500;

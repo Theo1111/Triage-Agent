@@ -25,8 +25,16 @@ export interface ClassifyEmailResult {
   overridesApplied: string[];
 }
 
+export interface ClassifyThreadContext {
+  isThreadReply: boolean;
+  priorMessageCount: number;
+  existingTriageItemId: string | null;
+  existingTriageStatus: string | null;
+}
+
 export async function classifyEmailById(
-  inboundEmailId: string
+  inboundEmailId: string,
+  threadContext?: ClassifyThreadContext
 ): Promise<ClassifyEmailResult> {
   // ── 1. Fetch the stored email ────────────────────────────────────────────
   const email = await inboundEmailsRepo.findById(inboundEmailId);
@@ -80,6 +88,13 @@ export async function classifyEmailById(
       is_inline: a.is_inline,
       content_id: a.content_id,
     })),
+    // Thread context — helps the model distinguish replies from first-contact reports
+    ...(threadContext ? {
+      is_thread_reply: threadContext.isThreadReply,
+      thread_prior_message_count: threadContext.priorMessageCount,
+      existing_triage_item_id: threadContext.existingTriageItemId,
+      existing_triage_status: threadContext.existingTriageStatus,
+    } : {}),
   };
 
   // ── 5. Call the agent ────────────────────────────────────────────────────

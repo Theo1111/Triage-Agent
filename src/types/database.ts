@@ -26,7 +26,7 @@ export interface OauthAccount {
   updated_at: Date;
 }
 
-export type WatchStatus = "active" | "expired" | "renewal_failed" | "stopped" | "unknown";
+export type WatchStatus = "active" | "expired" | "renewal_failed" | "stopped" | "unknown" | "oauth_invalid";
 
 export interface GmailWatchState {
   id: string;

@@ -49,6 +49,10 @@ const envSchema = z.object({
   // Set a long random string in production: openssl rand -hex 32
   DASHBOARD_OPERATOR_SESSION_SECRET: z.string().optional(),
 
+  // Cron endpoint protection secret. Set in Vercel env and pass as Authorization: Bearer <secret>.
+  // Generate with: openssl rand -hex 32
+  CRON_SECRET: z.string().optional(),
+
   // Future domain-wide delegation — not used in V1
   GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL: z.string().optional(),
   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().optional(),

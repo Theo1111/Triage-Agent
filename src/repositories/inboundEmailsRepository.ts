@@ -110,6 +110,20 @@ export async function findById(id: string): Promise<InboundEmail | null> {
   return queryOne<InboundEmail>("SELECT * FROM inbound_emails WHERE id = $1", [id]);
 }
 
+// Count other emails in the same Gmail thread (excluding the current email).
+// Used by thread reply detection to determine if this is a reply.
+export async function countThreadSiblings(
+  gmailThreadId: string,
+  excludeEmailId: string
+): Promise<number> {
+  const row = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM inbound_emails
+     WHERE gmail_thread_id = $1 AND id != $2`,
+    [gmailThreadId, excludeEmailId]
+  );
+  return Number(row?.count ?? 0);
+}
+
 export async function findAwaitingClassification(limit = 50): Promise<InboundEmail[]> {
   return query<InboundEmail>(
     `SELECT * FROM inbound_emails

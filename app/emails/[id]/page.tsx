@@ -6,14 +6,17 @@ import type { EmailClassification, TriageItem } from "@/src/types/database";
 
 export const dynamic = "force-dynamic";
 
-// Safe email fields only — no body_text, body_html, raw_mime, payload_json
-interface SafeEmail {
+interface EmailDetail {
   id: string;
   source_inbox_email: string;
   sender_email: string | null;
   sender_name: string | null;
+  recipient_emails: string[] | null;
+  cc_emails: string[] | null;
   subject: string | null;
   snippet: string | null;
+  body_text: string | null;
+  body_html: string | null;
   received_at: Date | null;
   has_attachments: boolean;
   attachment_count: number;
@@ -58,6 +61,25 @@ const pill = (text: string, color: string) => ({
   textTransform: "capitalize" as const,
 });
 
+// Strip HTML tags and decode common entities for plain-text fallback.
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export default async function EmailDetailPage({
   params,
 }: {
@@ -66,8 +88,9 @@ export default async function EmailDetailPage({
   const { id } = await params;
 
   const [email, classification, triageItem] = await Promise.all([
-    queryOne<SafeEmail>(
-      `SELECT id, source_inbox_email, sender_email, sender_name, subject, snippet,
+    queryOne<EmailDetail>(
+      `SELECT id, source_inbox_email, sender_email, sender_name, recipient_emails, cc_emails,
+              subject, snippet, body_text, body_html,
               received_at, has_attachments, attachment_count, created_at
        FROM inbound_emails WHERE id = $1`,
       [id]
@@ -91,6 +114,17 @@ export default async function EmailDetailPage({
   const senderDisplay = email.sender_name
     ? `${email.sender_name} <${email.sender_email ?? "unknown"}>`
     : (email.sender_email ?? "Unknown sender");
+
+  const toDisplay = email.recipient_emails?.join(", ") ?? email.source_inbox_email;
+
+  // Resolve body: plain text first, HTML stripped to text second, snippet last.
+  const bodyText =
+    email.body_text?.trim() ||
+    (email.body_html ? stripHtml(email.body_html) : null) ||
+    email.snippet ||
+    null;
+
+  const isSnippetOnly = !email.body_text && !email.body_html && !!email.snippet;
 
   const s = {
     page: {
@@ -116,10 +150,17 @@ export default async function EmailDetailPage({
     row: { display: "flex", gap: "8px", marginBottom: "10px", alignItems: "flex-start" } as React.CSSProperties,
     label: { fontSize: "13px", fontWeight: 600, color: "#374151", minWidth: "110px", flexShrink: 0 },
     value: { fontSize: "13px", color: "#111827" },
-    snippet: {
-      marginTop: "12px", padding: "12px 14px", background: "#f3f4f6",
-      borderRadius: "6px", fontSize: "13px", color: "#374151", lineHeight: "1.55",
-      borderLeft: "3px solid #d1d5db",
+    bodyWrap: {
+      marginTop: "16px", padding: "16px 18px", background: "#f9fafb",
+      borderRadius: "6px", border: "1px solid #e5e7eb",
+    } as React.CSSProperties,
+    bodyText: {
+      margin: 0, fontSize: "13px", color: "#111827", lineHeight: "1.65",
+      whiteSpace: "pre-wrap", wordBreak: "break-word" as const,
+      fontFamily: "inherit",
+    } as React.CSSProperties,
+    snippetNote: {
+      fontSize: "11px", color: "#9ca3af", fontStyle: "italic", marginTop: "8px",
     } as React.CSSProperties,
     noData: { fontSize: "13px", color: "#9ca3af", fontStyle: "italic" },
   };
@@ -131,7 +172,7 @@ export default async function EmailDetailPage({
       <h1 style={s.subject}>{email.subject ?? "(no subject)"}</h1>
       <p style={s.inboxLabel}>Inbox: {email.source_inbox_email}</p>
 
-      {/* Email metadata */}
+      {/* Email metadata + body */}
       <div style={s.card}>
         <div style={s.cardTitle}>Email</div>
         <div style={s.row}>
@@ -140,8 +181,14 @@ export default async function EmailDetailPage({
         </div>
         <div style={s.row}>
           <span style={s.label}>To</span>
-          <span style={s.value}>{email.source_inbox_email}</span>
+          <span style={s.value}>{toDisplay}</span>
         </div>
+        {email.cc_emails && email.cc_emails.length > 0 && (
+          <div style={s.row}>
+            <span style={s.label}>CC</span>
+            <span style={s.value}>{email.cc_emails.join(", ")}</span>
+          </div>
+        )}
         <div style={s.row}>
           <span style={s.label}>Received</span>
           <span style={s.value}>{fmt(email.received_at)}</span>
@@ -152,8 +199,19 @@ export default async function EmailDetailPage({
             <span style={s.value}>{email.attachment_count}</span>
           </div>
         )}
-        {email.snippet && (
-          <div style={s.snippet}>{email.snippet}</div>
+
+        {/* Full body */}
+        {bodyText ? (
+          <div style={s.bodyWrap}>
+            <pre style={s.bodyText}>{bodyText}</pre>
+            {isSnippetOnly && (
+              <p style={s.snippetNote}>
+                Full body not stored for this email — showing Gmail snippet only.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p style={{ ...s.noData, marginTop: "12px" }}>No email body available.</p>
         )}
       </div>
 
@@ -187,6 +245,12 @@ export default async function EmailDetailPage({
             <div style={s.row}>
               <span style={s.label}>Tags</span>
               <span style={s.value}>{classification.category_tags.join(", ")}</span>
+            </div>
+          )}
+          {classification.recommended_next_step && (
+            <div style={s.row}>
+              <span style={s.label}>Next Step</span>
+              <span style={s.value}>{classification.recommended_next_step}</span>
             </div>
           )}
         </div>

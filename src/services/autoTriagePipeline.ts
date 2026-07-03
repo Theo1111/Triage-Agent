@@ -3,6 +3,7 @@ import { routeClassifiedEmail } from "@/src/services/slackAlerts";
 import { getCurrentClassification } from "@/src/services/classification";
 import { findByInboundEmailId } from "@/src/services/triageItems";
 import { logEvent } from "@/src/services/agentAuditLog";
+import { detectThreadContext, checkIsObviousAcknowledgement } from "@/src/services/threadReplyFilter";
 import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -14,6 +15,8 @@ export interface AutoTriageResult {
   classificationId: string | null;
   triageItemId: string | null;
   slackAction?: "posted" | "blocked" | "ignored";
+  // Set when this email is a reply linked to an existing triage item.
+  linkedTriageItemId?: string | null;
   error?: string;
 }
 
@@ -58,6 +61,90 @@ export async function runAutoTriagePipeline(
     };
   }
 
+  // ── Thread reply detection ───────────────────────────────────────────────
+  // Check BEFORE calling the AI to avoid burning tokens on obvious acks.
+  const threadCtx = await detectThreadContext(email);
+
+  if (threadCtx.isThreadReply) {
+    const ackCheck = checkIsObviousAcknowledgement(email);
+    const linkedTriageItemId = threadCtx.existingTriageItem?.id ?? null;
+
+    console.log(
+      `[auto-triage] thread_reply email=${inboundEmailId}` +
+      ` gmailMessageId=${email.gmail_message_id}` +
+      ` gmailThreadId=${email.gmail_thread_id}` +
+      ` sender=${email.sender_email}` +
+      ` subject="${email.subject ?? "(none)"}"` +
+      ` siblings=${threadCtx.priorMessageCount}` +
+      ` linkedTriageItemId=${linkedTriageItemId ?? "none"}` +
+      ` isAck=${ackCheck.isAcknowledgement}` +
+      ` ackReason=${ackCheck.reason}`
+    );
+
+    await logEvent({
+      inboundEmailId,
+      eventType: "thread_reply_received",
+      action: "Email is a reply in an existing Gmail thread",
+      metadata: {
+        gmail_message_id: email.gmail_message_id,
+        gmail_thread_id: email.gmail_thread_id,
+        prior_message_count: threadCtx.priorMessageCount,
+        linked_triage_item_id: linkedTriageItemId,
+        sender: email.sender_email,
+        subject: email.subject,
+        is_acknowledgement: ackCheck.isAcknowledgement,
+        ack_reason: ackCheck.reason,
+      },
+    });
+
+    if (ackCheck.isAcknowledgement) {
+      // Log the suppression with all required fields for debugging.
+      console.log(
+        `[auto-triage] suppressed=true` +
+        ` suppressedReason=internal_acknowledgement_reply` +
+        ` email=${inboundEmailId}` +
+        ` gmailMessageId=${email.gmail_message_id}` +
+        ` gmailThreadId=${email.gmail_thread_id}` +
+        ` sender=${email.sender_email}` +
+        ` subject="${email.subject ?? "(none)"}"` +
+        (linkedTriageItemId ? ` linkedTriageItemId=${linkedTriageItemId}` : "")
+      );
+
+      await logEvent({
+        inboundEmailId,
+        eventType: "reply_suppressed_as_acknowledgement",
+        action: "Internal acknowledgement reply suppressed — no new Slack alert created",
+        reason: ackCheck.reason,
+        metadata: {
+          gmail_message_id: email.gmail_message_id,
+          gmail_thread_id: email.gmail_thread_id,
+          sender: email.sender_email,
+          subject: email.subject,
+          suppressed: true,
+          suppressed_reason: "internal_acknowledgement_reply",
+          linked_triage_item_id: linkedTriageItemId,
+        },
+      });
+
+      return {
+        inboundEmailId,
+        skipped: true,
+        skipReason: "internal_acknowledgement_reply",
+        classificationId: null,
+        triageItemId: null,
+        linkedTriageItemId,
+      };
+    }
+
+    // Non-suppressed reply (external sender, escalation signals, or body too long).
+    // Fall through to full classification with thread context so the model knows
+    // this is a follow-up — it should be harder to generate a new urgent alert.
+    console.log(
+      `[auto-triage] thread_reply not suppressed — proceeding with classification` +
+      ` email=${inboundEmailId} ackReason=${ackCheck.reason}`
+    );
+  }
+
   await logEvent({
     inboundEmailId,
     eventType: "auto_triage_started",
@@ -65,6 +152,8 @@ export async function runAutoTriagePipeline(
     metadata: {
       has_classification: !!existingClassification,
       has_triage_item: !!existingTriageItem,
+      is_thread_reply: threadCtx.isThreadReply,
+      linked_triage_item_id: threadCtx.existingTriageItem?.id ?? null,
     },
   });
 
@@ -75,7 +164,19 @@ export async function runAutoTriagePipeline(
   try {
     // ── Step 1: Classify ─────────────────────────────────────────────────
     if (!existingClassification) {
-      const classifyResult = await classifyEmailById(inboundEmailId);
+      // Pass thread context so the model knows this is a reply and can downgrade urgency
+      // for non-escalating follow-ups.
+      const classifyResult = await classifyEmailById(
+        inboundEmailId,
+        threadCtx.isThreadReply
+          ? {
+              isThreadReply: true,
+              priorMessageCount: threadCtx.priorMessageCount,
+              existingTriageItemId: threadCtx.existingTriageItem?.id ?? null,
+              existingTriageStatus: threadCtx.existingTriageItem?.status ?? null,
+            }
+          : undefined
+      );
       classificationId = classifyResult.classification.id;
 
       console.log(
@@ -120,6 +221,7 @@ export async function runAutoTriagePipeline(
         classification_id: classificationId,
         triage_item_id: triageItemId,
         slack_action: slackAction ?? "skipped",
+        is_thread_reply: threadCtx.isThreadReply,
       },
     });
 
@@ -128,7 +230,14 @@ export async function runAutoTriagePipeline(
       `triage=${triageItemId} slack=${slackAction ?? "skipped"}`
     );
 
-    return { inboundEmailId, skipped: false, classificationId, triageItemId, slackAction };
+    return {
+      inboundEmailId,
+      skipped: false,
+      classificationId,
+      triageItemId,
+      slackAction,
+      linkedTriageItemId: threadCtx.existingTriageItem?.id ?? null,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[auto-triage] FAILED email=${inboundEmailId}:`, message);

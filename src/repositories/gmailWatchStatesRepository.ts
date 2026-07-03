@@ -1,4 +1,4 @@
-import { queryOne } from "@/src/lib/db";
+import { query, queryOne } from "@/src/lib/db";
 import type { GmailWatchState, WatchStatus } from "@/src/types/database";
 
 export async function findByInboxId(monitoredInboxId: string): Promise<GmailWatchState | null> {
@@ -77,5 +77,42 @@ export async function setStatus(monitoredInboxId: string, status: WatchStatus): 
   await queryOne(
     "UPDATE gmail_watch_states SET watch_status = $1, updated_at = now() WHERE monitored_inbox_id = $2",
     [status, monitoredInboxId]
+  );
+}
+
+// Find watches that need renewal: expiring within 24h, already expired, missing expiration,
+// or in a non-active status. Excludes oauth_invalid (needs human reconnect) and stopped.
+export async function findAllNeedingRenewal(): Promise<GmailWatchState[]> {
+  return query<GmailWatchState>(
+    `SELECT gws.* FROM gmail_watch_states gws
+     JOIN monitored_inboxes mi ON mi.id = gws.monitored_inbox_id
+     WHERE mi.is_active = true
+       AND gws.watch_status NOT IN ('oauth_invalid', 'stopped')
+       AND (
+         gws.watch_expiration IS NULL
+         OR gws.watch_expiration <= now() + INTERVAL '24 hours'
+         OR gws.watch_status != 'active'
+       )
+     ORDER BY gws.watch_expiration ASC NULLS FIRST`
+  );
+}
+
+// Mark an inbox as needing OAuth reconnect. Clears watch expiration to prevent
+// future renewal attempts until the user reconnects the account.
+export async function markOauthInvalid(monitoredInboxId: string): Promise<void> {
+  await queryOne(
+    `UPDATE gmail_watch_states
+     SET watch_status = 'oauth_invalid',
+         watch_expiration = NULL,
+         updated_at = now()
+     WHERE monitored_inbox_id = $1`,
+    [monitoredInboxId]
+  );
+}
+
+// Find all inboxes with oauth_invalid status (need reconnect).
+export async function findOauthInvalid(): Promise<GmailWatchState[]> {
+  return query<GmailWatchState>(
+    `SELECT * FROM gmail_watch_states WHERE watch_status = 'oauth_invalid' ORDER BY email_address`
   );
 }

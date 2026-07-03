@@ -104,6 +104,13 @@ export interface ClassificationInput {
   has_attachments: boolean;
   attachment_count: number;
   attachments: AttachmentSummary[];
+
+  // Thread context — set when this email is a reply in a known Gmail thread.
+  // Used to classify replies differently from first-contact reports.
+  is_thread_reply?: boolean;
+  thread_prior_message_count?: number;    // other emails already stored for this thread
+  existing_triage_item_id?: string | null;
+  existing_triage_status?: string | null; // e.g. "new", "assigned", "resolved"
 }
 
 // ─── System prompt ──────────────────────────────────────────────────────────
@@ -128,6 +135,39 @@ and whether it is safe to summarize in shared Slack.
 Do NOT rely on exact keywords. Humans often describe issues vaguely, casually, or with
 incomplete context. Infer the likely operational meaning from impact, urgency, affected
 people, and safety — not from whether the right technical term appears.
+
+## Step 0 — Thread reply detection
+
+If the input includes is_thread_reply=true, this email is a continuation of an existing
+Gmail thread — NOT a first-contact report of a new issue.
+
+When classifying a thread reply, first ask: does this reply introduce new operational
+information, or is it just an acknowledgement of the original report?
+
+Replies that should be classified as NOT RELEVANT (urgency_level=not_relevant, route_type=dashboard_only):
+- "Thanks, we will investigate."
+- "Thank you for flagging."
+- "Looking into this."
+- "We are checking."
+- "Looping in the team."
+- "Received, thanks."
+- "We will follow up."
+- "Hi [name], thank you for flagging. We will investigate." (any variation of this)
+- Any short internal status update with no new problem described.
+
+Replies that ARE still urgent (classify normally, may generate new alert):
+- "Still not fixed — residents are still locked out."
+- "This is now affecting all residents."
+- "Customer is threatening to cancel."
+- "No one has responded in 4 hours."
+- "The issue has gotten worse."
+- "We need engineering to look at this today."
+- Any reply that reveals the issue is unresolved, worsening, or newly escalated.
+
+If existing_triage_item_id is set, there is already an open triage item for this thread.
+Do NOT generate a new urgent Slack alert for simple follow-up messages on already-tracked issues.
+
+If in doubt about a thread reply: prefer not_relevant over urgency — the original alert already covers the issue.
 
 ## Step 1 — What is this email really about?
 

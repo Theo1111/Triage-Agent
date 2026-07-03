@@ -93,8 +93,13 @@ export async function GET() {
       lastSync:     w.last_successful_sync_at?.toISOString() ?? null,
       lastNotified: w.last_notification_at?.toISOString() ?? null,
       hasHistoryId: !!w.last_processed_history_id,
+      needsReconnect: w.watch_status === "oauth_invalid",
     }));
-    const anyExpired = watches.some(w => w.watch_status !== "active" || (w.watch_expiration && new Date(w.watch_expiration) < new Date()));
+    const anyExpired = watches.some(w =>
+      w.watch_status === "oauth_invalid" ||
+      w.watch_status !== "active" ||
+      (w.watch_expiration && new Date(w.watch_expiration) < new Date())
+    );
     if (anyExpired) allOk = false;
   } catch {
     checks.watchStatus = null;
@@ -119,8 +124,10 @@ export async function GET() {
   const messages: string[] = [];
   if (inboxCount === 0)  messages.push("No active inboxes — add one at /api/gmail/watch.");
   if (oauthCount === 0)  messages.push("No OAuth credentials — run the Gmail OAuth flow first.");
-  const expiredWatches = (checks.watchStatus as { status: string; expiresIn: string | null }[] | null)
-    ?.filter(w => w.expiresIn === "EXPIRED" || w.status !== "active") ?? [];
+  const watchStatusArr = (checks.watchStatus as { status: string; expiresIn: string | null }[] | null) ?? [];
+  const oauthInvalidWatches = watchStatusArr.filter(w => w.status === "oauth_invalid");
+  const expiredWatches = watchStatusArr.filter(w => w.status !== "oauth_invalid" && (w.expiresIn === "EXPIRED" || w.status !== "active"));
+  if (oauthInvalidWatches.length > 0) messages.push(`${oauthInvalidWatches.length} inbox(es) need OAuth reconnect — visit /api/auth/google.`);
   if (expiredWatches.length > 0) messages.push(`${expiredWatches.length} watch(es) expired — POST /api/gmail/renew-watches or click Refresh Emails.`);
 
   const message = allOk

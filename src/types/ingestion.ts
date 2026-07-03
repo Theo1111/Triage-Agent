@@ -70,10 +70,12 @@ export interface GmailWatchResult {
   historyId?: string;
   expiration?: Date;
   error?: string;
+  needsOauthReconnect?: boolean;
 }
 
 export interface WatchRenewalSummary {
   checked: number;
   renewed: number;
   failed: number;
+  oauthInvalid?: number;
 }

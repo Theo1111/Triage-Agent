@@ -67,6 +67,24 @@ export async function findLatestByEmailId(inboundEmailId: string): Promise<Triag
   );
 }
 
+// Find the most recent open triage item for a Gmail thread (excluding the current email).
+// Used to link replies to existing triage items and to suppress duplicate Slack alerts.
+export async function findOpenByThreadId(
+  gmailThreadId: string,
+  excludeEmailId: string
+): Promise<TriageItem | null> {
+  return queryOne<TriageItem>(
+    `SELECT ti.* FROM triage_items ti
+     JOIN inbound_emails ie ON ie.id = ti.inbound_email_id
+     WHERE ie.gmail_thread_id = $1
+       AND ie.id != $2
+       AND ti.status NOT IN ('archived', 'ignored')
+     ORDER BY ti.created_at DESC
+     LIMIT 1`,
+    [gmailThreadId, excludeEmailId]
+  );
+}
+
 export async function findOpen(limit = 50): Promise<TriageItem[]> {
   return query<TriageItem>(
     `SELECT * FROM triage_items
