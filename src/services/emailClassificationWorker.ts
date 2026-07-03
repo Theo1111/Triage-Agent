@@ -3,6 +3,7 @@ import type { ClassificationInput } from "@/src/agents/emailTriageAgent";
 import { BODY_MAX_CHARS, SENSITIVE_CATEGORY_TAGS } from "@/src/config/agents";
 import { TRIAGE_MODEL, TRIAGE_PROMPT_VERSION } from "@/src/config/agents";
 import { extractNewReplyBody } from "@/src/services/threadReplyFilter";
+import { cleanEmailBodyForTriage } from "@/src/lib/cleanEmailBody";
 
 import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
 import * as attachmentsRepo from "@/src/repositories/emailAttachmentsRepository";
@@ -65,19 +66,26 @@ export async function classifyEmailById(
   // ── 4. Build sanitized classification input ──────────────────────────────
   const rawBody = email.body_text ?? "";
 
-  // For thread replies, strip quoted history so the AI classifies the new reply text only —
-  // not the original issue that was quoted in the thread. Without this, the AI reads the
-  // quoted urgent content ("fobs not working, resident moving in") and classifies the reply
-  // as a new urgent issue even if the reply itself is just "copying @X to support".
-  const bodyForClassification = threadContext?.isThreadReply
-    ? extractNewReplyBody(rawBody)
-    : rawBody;
+  // Remove Exclaimer URLs, mailto:/tel: link markup, cid: placeholders, and
+  // email signatures from every email before classification.
+  const cleanedBody = cleanEmailBodyForTriage(rawBody);
 
-  if (threadContext?.isThreadReply && bodyForClassification !== rawBody) {
+  // For thread replies, additionally strip quoted history so the AI classifies
+  // only the new reply text — not the original issue quoted in the thread.
+  const bodyForClassification = threadContext?.isThreadReply
+    ? extractNewReplyBody(cleanedBody)
+    : cleanedBody;
+
+  if (threadContext?.isThreadReply && bodyForClassification !== cleanedBody) {
     console.log(
       `[worker] thread_reply email=${inboundEmailId} ` +
-      `raw_body_chars=${rawBody.length} stripped_body_chars=${bodyForClassification.length} ` +
-      `quote_stripped=true`
+      `raw_body_chars=${rawBody.length} cleaned_chars=${cleanedBody.length} ` +
+      `stripped_body_chars=${bodyForClassification.length} quote_stripped=true`
+    );
+  } else if (cleanedBody.length !== rawBody.length) {
+    console.log(
+      `[worker] email=${inboundEmailId} ` +
+      `raw_body_chars=${rawBody.length} cleaned_chars=${cleanedBody.length} body_cleaned=true`
     );
   }
 

@@ -5,6 +5,7 @@ import { formatCategoryLabel } from "@/src/lib/formatCategory";
 import { formatTorontoDateTime } from "@/src/lib/formatDate";
 import { deriveTriageDisplayState } from "@/src/lib/triageDisplayState";
 import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
+import { cleanEmailBodyForTriage } from "@/src/lib/cleanEmailBody";
 import type { InboundEmail, EmailClassification, TriageItem } from "@/src/types/database";
 
 export const dynamic = "force-dynamic";
@@ -108,6 +109,17 @@ const s = {
   } as React.CSSProperties,
   snippetNote: {
     fontSize: "11px", color: "#9ca3af", fontStyle: "italic", marginTop: "8px",
+  } as React.CSSProperties,
+  rawToggle: {
+    marginTop: "12px", fontSize: "11px", color: "#6b7280",
+  } as React.CSSProperties,
+  rawToggleSummary: {
+    cursor: "pointer", userSelect: "none" as const, color: "#6b7280",
+    fontSize: "11px", fontStyle: "italic",
+  } as React.CSSProperties,
+  rawBodyWrap: {
+    marginTop: "8px", padding: "12px 14px", background: "#f3f4f6",
+    borderRadius: "4px", border: "1px dashed #d1d5db",
   } as React.CSSProperties,
   noData: { fontSize: "13px", color: "#9ca3af", fontStyle: "italic" },
   threadNote: {
@@ -290,6 +302,8 @@ export default async function EmailDetailPage({
           : (msg.sender_email ?? "Unknown sender");
         const toDisplay = msg.recipient_emails?.join(", ") ?? msg.source_inbox_email;
         const { text: bodyText, isSnippetOnly } = resolveBody(msg);
+        const cleanedBody = bodyText && !isSnippetOnly ? cleanEmailBodyForTriage(bodyText) : null;
+        const bodyChanged = cleanedBody !== null && cleanedBody !== bodyText;
 
         return (
           <div key={msg.id} style={isTarget ? s.cardHighlighted : s.card}>
@@ -325,13 +339,21 @@ export default async function EmailDetailPage({
               </div>
             )}
 
-            {bodyText ? (
+            {(cleanedBody || bodyText) ? (
               <div style={s.bodyWrap}>
-                <pre style={s.bodyText}>{bodyText}</pre>
+                <pre style={s.bodyText}>{cleanedBody ?? bodyText}</pre>
                 {isSnippetOnly && (
                   <p style={s.snippetNote}>
                     Full body not stored — showing Gmail snippet only.
                   </p>
+                )}
+                {bodyChanged && (
+                  <details style={s.rawToggle}>
+                    <summary style={s.rawToggleSummary}>Show raw body (includes signatures, tracking links)</summary>
+                    <div style={s.rawBodyWrap}>
+                      <pre style={{ ...s.bodyText, color: "#6b7280" }}>{bodyText}</pre>
+                    </div>
+                  </details>
                 )}
               </div>
             ) : (

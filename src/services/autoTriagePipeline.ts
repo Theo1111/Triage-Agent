@@ -23,6 +23,7 @@ import {
   type MessageKind,
 } from "@/src/services/threadReplyFilter";
 import { syncTriageItemToSlack } from "@/src/lib/slack/syncTriageToSlack";
+import { cleanEmailBodyForTriage } from "@/src/lib/cleanEmailBody";
 import { postThreadReply } from "@/src/lib/slack/slackWebApi";
 import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
 
@@ -175,7 +176,7 @@ export async function runAutoTriagePipeline(
     !isInternalSender &&
     !["resolved", "archived"].includes(threadCtx.existingTriageItem.status)
   ) {
-    const replyBody = extractNewReplyBody(email.body_text ?? email.snippet ?? "");
+    const replyBody = extractNewReplyBody(cleanEmailBodyForTriage(email.body_text ?? email.snippet ?? ""));
     const senderDisplay =
       email.sender_name
         ? `${email.sender_name} <${email.sender_email ?? "unknown"}>`
