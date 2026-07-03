@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { SerializedTriageItem } from "./types";
 import styles from "./dashboard.module.css";
 import { formatCategoryLabel } from "@/src/lib/formatCategory";
+import { formatTorontoDateTimeShort } from "@/src/lib/formatDate";
 import DetailDrawer from "./DetailDrawer";
 
 interface Props {
@@ -49,11 +50,7 @@ function ageClass(ms: number): string {
   return styles.ageRed;
 }
 function fmtDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-US", {
-    month: "short", day: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
+  return formatTorontoDateTimeShort(iso);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

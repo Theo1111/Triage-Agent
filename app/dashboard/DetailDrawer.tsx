@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { SerializedTriageItem } from "./types";
 import styles from "./dashboard.module.css";
 import { formatCategoryLabel } from "@/src/lib/formatCategory";
+import { formatTorontoDateTime } from "@/src/lib/formatDate";
 
 interface Props {
   item: SerializedTriageItem | null;
@@ -12,11 +13,7 @@ interface Props {
 }
 
 function fmtDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-US", {
-    month: "short", day: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
+  return formatTorontoDateTime(iso);
 }
 
 export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { queryOne } from "@/src/lib/db";
 import { formatCategoryLabel } from "@/src/lib/formatCategory";
+import { formatTorontoDateTime } from "@/src/lib/formatDate";
 import type { EmailClassification, TriageItem } from "@/src/types/database";
 
 export const dynamic = "force-dynamic";
@@ -24,11 +25,7 @@ interface EmailDetail {
 }
 
 function fmt(d: Date | string | null | undefined): string {
-  if (!d) return "—";
-  return new Date(d as string).toLocaleString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
+  return formatTorontoDateTime(d);
 }
 
 function urgencyColor(level: string): string {
