@@ -1,6 +1,20 @@
 -- 005_operator_profiles.sql
 -- Persisted dashboard operator profiles with hashed passwords.
--- Replaces the previous localStorage-only operator tracking.
+-- Safe to run more than once (all DDL is idempotent).
+
+-- pgcrypto provides gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- set_updated_at() is normally created by 001_email_ingestion.sql.
+-- Defined here with CREATE OR REPLACE so this migration is self-contained
+-- and safe to run in isolation (e.g. against a fresh schema).
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
 CREATE TABLE IF NOT EXISTS operator_profiles (
   id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),

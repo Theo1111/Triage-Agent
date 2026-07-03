@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listOperatorProfiles } from "@/src/services/operatorProfiles";
+import { friendlyOperatorError } from "@/src/lib/operatorErrors";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,8 @@ export async function GET() {
     const profiles = await listOperatorProfiles();
     return NextResponse.json({ profiles });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const msg = friendlyOperatorError(err);
+    console.error("[operators/list]", err);
+    return NextResponse.json({ error: msg, profiles: [] }, { status: 500 });
   }
 }

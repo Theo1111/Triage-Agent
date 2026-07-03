@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOperatorFromRequest } from "@/src/lib/dashboardOperatorSession";
+import { friendlyOperatorError } from "@/src/lib/operatorErrors";
 
 export const dynamic = "force-dynamic";
 
@@ -9,11 +10,12 @@ export async function GET(req: NextRequest) {
     const operator = await getOperatorFromRequest(req);
     return NextResponse.json({ operator: operator ?? null });
   } catch (err) {
-    const raw = err instanceof Error ? err.message : "Unknown error";
-    if (raw.includes("operator_profiles") || raw.includes("42P01")) {
-      // Table not yet migrated — treat as unauthenticated rather than crashing.
-      return NextResponse.json({ operator: null });
+    const msg = friendlyOperatorError(err);
+    console.error("[operators/me]", err);
+    // Table missing — treat as unauthenticated so the login page still renders.
+    if (msg.includes("migration") || msg.includes("not set up")) {
+      return NextResponse.json({ operator: null, warning: msg });
     }
-    return NextResponse.json({ error: raw }, { status: 500 });
+    return NextResponse.json({ operator: null, error: msg }, { status: 500 });
   }
 }

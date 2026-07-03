@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createOperatorProfile } from "@/src/services/operatorProfiles";
+import { friendlyOperatorError } from "@/src/lib/operatorErrors";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +9,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as {
       username?: string;
-      displayName?: string;
+      displayName?: string | null;
       password?: string;
       confirmPassword?: string;
     };
@@ -19,6 +20,9 @@ export async function POST(req: NextRequest) {
     }
     if (!password) {
       return NextResponse.json({ error: "password is required" }, { status: 400 });
+    }
+    if (password.length < 8) {
+      return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
     }
     if (password !== confirmPassword) {
       return NextResponse.json({ error: "Passwords do not match" }, { status: 400 });
@@ -32,10 +36,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ profile });
   } catch (err) {
-    const raw = err instanceof Error ? err.message : "Unknown error";
-    const msg = raw.includes("operator_profiles") || raw.includes("42P01")
-      ? "Operator profile storage is not set up yet. Please run the operator_profiles migration."
-      : raw;
-    return NextResponse.json({ error: msg }, { status: 400 });
+    const msg = friendlyOperatorError(err);
+    console.error("[operators/create]", err);
+    const status = (err instanceof Error && err.message.includes("already taken")) ? 409 : 400;
+    return NextResponse.json({ error: msg }, { status });
   }
 }

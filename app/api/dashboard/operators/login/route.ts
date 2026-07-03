@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyOperatorPassword } from "@/src/services/operatorProfiles";
 import { setOperatorSessionCookie } from "@/src/lib/dashboardOperatorSession";
+import { friendlyOperatorError } from "@/src/lib/operatorErrors";
 
 export const dynamic = "force-dynamic";
 
@@ -10,13 +11,16 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as { username?: string; password?: string };
     const { username, password } = body;
 
-    if (!username?.trim() || !password) {
-      return NextResponse.json({ error: "username and password required" }, { status: 400 });
+    if (!username?.trim()) {
+      return NextResponse.json({ error: "Username is required" }, { status: 400 });
+    }
+    if (!password) {
+      return NextResponse.json({ error: "Password is required" }, { status: 400 });
     }
 
     const profile = await verifyOperatorPassword(username.trim(), password);
     if (!profile) {
-      // Intentionally vague — don't reveal whether username exists.
+      // Intentionally vague — don't reveal whether the username exists.
       return NextResponse.json({ error: "Invalid username or password" }, { status: 401 });
     }
 
@@ -24,10 +28,8 @@ export async function POST(req: NextRequest) {
     setOperatorSessionCookie(res, profile.id);
     return res;
   } catch (err) {
-    const raw = err instanceof Error ? err.message : "Unknown error";
-    const msg = raw.includes("operator_profiles") || raw.includes("42P01")
-      ? "Operator profile storage is not set up yet. Please run the operator_profiles migration."
-      : raw;
+    const msg = friendlyOperatorError(err);
+    console.error("[operators/login]", err);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
