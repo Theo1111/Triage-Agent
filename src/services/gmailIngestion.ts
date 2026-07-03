@@ -8,12 +8,201 @@ import { logError } from "./ingestionErrors";
 import { startRun, finishRun } from "./ingestionRuns";
 import { processAttachmentsForEmail } from "./attachmentIngestion";
 import { runAutoTriagePipeline } from "./autoTriagePipeline";
+import { registerWatch } from "./gmailWatch";
 import { env } from "@/src/config/env";
 import * as inboxesRepo from "@/src/repositories/monitoredInboxesRepository";
 import * as watchRepo from "@/src/repositories/gmailWatchStatesRepository";
 import * as pubsubRepo from "@/src/repositories/pubsubNotificationsRepository";
 import * as emailsRepo from "@/src/repositories/inboundEmailsRepository";
 import type { IngestionResult, ProcessHistoryInput, ProcessMessageInput, ProcessMessageResult } from "@/src/types/ingestion";
+
+// ── Types for manual sync ──────────────────────────────────────────────────────
+
+export interface InboxSyncDetail {
+  emailAddress: string;
+  watchRenewed: boolean;
+  historyExpired: boolean;
+  messagesFound: number;
+  newStored: number;
+  errors: number;
+  note?: string;
+}
+
+export interface ManualSyncResult {
+  inboxesChecked: number;
+  watchesRenewed: number;
+  watchRenewFailures: number;
+  totalMessagesFound: number;
+  totalNewStored: number;
+  totalDuplicatesSkipped: number;
+  totalAutomatedAlertsSkipped: number;
+  totalErrors: number;
+  inboxResults: InboxSyncDetail[];
+  status: "success" | "partial_success" | "failed" | "no_inboxes";
+}
+
+// ── Manual sync ───────────────────────────────────────────────────────────────
+// Renews all Gmail watches and processes history since each inbox's last known
+// historyId. Called by POST /api/gmail/sync (dashboard "Refresh Emails" button).
+// If a historyId is too old (watch expired for too long), the gap is noted in
+// the result — the watch is still renewed so future emails resume normally.
+
+export async function manualSyncAllInboxes(): Promise<ManualSyncResult> {
+  const inboxes = await inboxesRepo.findAllActive();
+
+  const result: ManualSyncResult = {
+    inboxesChecked: inboxes.length,
+    watchesRenewed: 0,
+    watchRenewFailures: 0,
+    totalMessagesFound: 0,
+    totalNewStored: 0,
+    totalDuplicatesSkipped: 0,
+    totalAutomatedAlertsSkipped: 0,
+    totalErrors: 0,
+    inboxResults: [],
+    status: inboxes.length === 0 ? "no_inboxes" : "success",
+  };
+
+  if (inboxes.length === 0) {
+    console.log("[manual-sync] No active inboxes configured");
+    return result;
+  }
+
+  for (const inbox of inboxes) {
+    const detail: InboxSyncDetail = {
+      emailAddress: inbox.email_address,
+      watchRenewed: false,
+      historyExpired: false,
+      messagesFound: 0,
+      newStored: 0,
+      errors: 0,
+    };
+
+    console.log(`[manual-sync] inbox=${inbox.email_address} — starting`);
+
+    // 1. Renew the Gmail watch so PubSub push notifications keep arriving.
+    const watchResult = await registerWatch(inbox.email_address);
+    if (watchResult.success) {
+      result.watchesRenewed++;
+      detail.watchRenewed = true;
+      console.log(`[manual-sync] watch renewed inbox=${inbox.email_address} historyId=${watchResult.historyId}`);
+    } else {
+      result.watchRenewFailures++;
+      console.warn(`[manual-sync] watch renewal failed inbox=${inbox.email_address}: ${watchResult.error}`);
+    }
+
+    // 2. Pick a historyId to start from (prefer last processed, fall back to current / renewal).
+    const watchState = await watchRepo.findByInboxId(inbox.id);
+    const historyId =
+      watchState?.last_processed_history_id ??
+      watchState?.current_history_id ??
+      watchResult.historyId;
+
+    if (!historyId) {
+      detail.note = "No historyId available. Watch registered; future emails will be delivered via PubSub.";
+      detail.errors++;
+      result.totalErrors++;
+      result.inboxResults.push(detail);
+      console.warn(`[manual-sync] inbox=${inbox.email_address} — no historyId, skipping history fetch`);
+      continue;
+    }
+
+    // 3. Process history.
+    const runId = randomUUID();
+    const run = await startRun({
+      runId,
+      triggerType: "manual_rerun",
+      triggerSource: "dashboard_manual_sync",
+    });
+
+    const counts: IngestionResult = {
+      runId,
+      messagesFound: 0,
+      newMessagesStored: 0,
+      externalMessagesStored: 0,
+      duplicatesSkipped: 0,
+      automatedAlertsSkipped: 0,
+      attachmentsFound: 0,
+      attachmentsStored: 0,
+      attachmentParseFailures: 0,
+      errors: 0,
+      status: "success",
+    };
+
+    try {
+      await processHistoryForInbox(
+        {
+          inboxId: inbox.id,
+          emailAddress: inbox.email_address,
+          incomingHistoryId: historyId,
+          ingestionRunId: run.id,
+          triggerType: "manual_rerun",
+        },
+        counts
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Gmail returns 404 / "Requested entity was not found" when a historyId is too old.
+      const isExpiredHistory =
+        msg.includes("not found") || msg.includes("404") || msg.toLowerCase().includes("starthistoryid");
+      if (isExpiredHistory) {
+        detail.historyExpired = true;
+        detail.note =
+          "History ID is too old — emails during the expiry gap cannot be recovered automatically. " +
+          "Watch renewed so future emails will resume normally.";
+        console.warn(`[manual-sync] inbox=${inbox.email_address} — history expired: ${msg}`);
+      } else {
+        detail.note = msg;
+        console.error(`[manual-sync] inbox=${inbox.email_address} — history fetch failed:`, msg);
+      }
+      counts.errors++;
+      counts.status = "failed";
+    }
+
+    detail.messagesFound = counts.messagesFound;
+    detail.newStored    = counts.newMessagesStored;
+    detail.errors      += counts.errors;
+
+    result.totalMessagesFound      += counts.messagesFound;
+    result.totalNewStored          += counts.newMessagesStored;
+    result.totalDuplicatesSkipped  += counts.duplicatesSkipped;
+    result.totalAutomatedAlertsSkipped += counts.automatedAlertsSkipped;
+    result.totalErrors             += counts.errors;
+
+    await finishRun(run, {
+      inboxesChecked:        1,
+      messagesFound:         counts.messagesFound,
+      newMessagesStored:     counts.newMessagesStored,
+      duplicatesSkipped:     counts.duplicatesSkipped,
+      automatedAlertsSkipped: counts.automatedAlertsSkipped,
+      attachmentsFound:      counts.attachmentsFound,
+      attachmentsStored:     counts.attachmentsStored,
+      attachmentParseFailures: counts.attachmentParseFailures,
+      errors:                counts.errors,
+    });
+
+    result.inboxResults.push(detail);
+  }
+
+  // Aggregate status.
+  if (result.totalErrors === 0 && result.status !== "no_inboxes") {
+    result.status = "success";
+  } else if (result.totalNewStored > 0 || result.totalDuplicatesSkipped > 0) {
+    result.status = "partial_success";
+  } else if (result.inboxesChecked > 0 && result.totalErrors > 0) {
+    result.status = "failed";
+  }
+
+  console.log(
+    `[manual-sync] done inboxes=${result.inboxesChecked} ` +
+    `watchesRenewed=${result.watchesRenewed} ` +
+    `found=${result.totalMessagesFound} ` +
+    `stored=${result.totalNewStored} ` +
+    `errors=${result.totalErrors}`
+  );
+
+  return result;
+}
 
 export async function processPubSubNotification(body: unknown): Promise<IngestionResult> {
   // Decode the Pub/Sub payload first so we can store it for debugging.
