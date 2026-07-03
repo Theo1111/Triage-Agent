@@ -41,12 +41,13 @@ export async function processAttachmentsForEmail(
       // Decode base64url to Buffer.
       const buffer = Buffer.from(base64Data.replace(/-/g, "+").replace(/_/g, "/"), "base64");
 
-      // Store file.
+      // Upload to Supabase Storage — direct buffer upload, no local disk write.
       const { bucket, storagePath } = await storeAttachment({
         emailId: input.inboundEmailId,
         attachmentId: part.attachmentId,
         filename: part.filename,
         data: buffer,
+        mimeType: part.mimeType,
       });
 
       // Upsert DB record.

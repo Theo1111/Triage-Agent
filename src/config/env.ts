@@ -16,6 +16,10 @@ const envSchema = z.object({
   GOOGLE_PUBSUB_TOPIC: z.string().min(1, "GOOGLE_PUBSUB_TOPIC is required"),
   GOOGLE_PUBSUB_SUBSCRIPTION: z.string().min(1, "GOOGLE_PUBSUB_SUBSCRIPTION is required"),
 
+  // Supabase (used for attachment storage)
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+
   // Attachment storage
   ATTACHMENT_STORAGE_BUCKET: z.string().min(1, "ATTACHMENT_STORAGE_BUCKET is required"),
 
