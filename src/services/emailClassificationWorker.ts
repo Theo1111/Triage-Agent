@@ -2,6 +2,7 @@ import { EmailTriageAgent } from "@/src/agents/emailTriageAgent";
 import type { ClassificationInput } from "@/src/agents/emailTriageAgent";
 import { BODY_MAX_CHARS, SENSITIVE_CATEGORY_TAGS } from "@/src/config/agents";
 import { TRIAGE_MODEL, TRIAGE_PROMPT_VERSION } from "@/src/config/agents";
+import { extractNewReplyBody } from "@/src/services/threadReplyFilter";
 
 import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
 import * as attachmentsRepo from "@/src/repositories/emailAttachmentsRepository";
@@ -63,8 +64,25 @@ export async function classifyEmailById(
 
   // ── 4. Build sanitized classification input ──────────────────────────────
   const rawBody = email.body_text ?? "";
-  const truncated = rawBody.length > BODY_MAX_CHARS;
-  const body = truncated ? rawBody.slice(0, BODY_MAX_CHARS) : rawBody;
+
+  // For thread replies, strip quoted history so the AI classifies the new reply text only —
+  // not the original issue that was quoted in the thread. Without this, the AI reads the
+  // quoted urgent content ("fobs not working, resident moving in") and classifies the reply
+  // as a new urgent issue even if the reply itself is just "copying @X to support".
+  const bodyForClassification = threadContext?.isThreadReply
+    ? extractNewReplyBody(rawBody)
+    : rawBody;
+
+  if (threadContext?.isThreadReply && bodyForClassification !== rawBody) {
+    console.log(
+      `[worker] thread_reply email=${inboundEmailId} ` +
+      `raw_body_chars=${rawBody.length} stripped_body_chars=${bodyForClassification.length} ` +
+      `quote_stripped=true`
+    );
+  }
+
+  const truncated = bodyForClassification.length > BODY_MAX_CHARS;
+  const body = truncated ? bodyForClassification.slice(0, BODY_MAX_CHARS) : bodyForClassification;
 
   const input: ClassificationInput = {
     inbound_email_id: email.id,

@@ -3,7 +3,12 @@ import { routeClassifiedEmail } from "@/src/services/slackAlerts";
 import { getCurrentClassification } from "@/src/services/classification";
 import { findByInboundEmailId } from "@/src/services/triageItems";
 import { logEvent } from "@/src/services/agentAuditLog";
-import { detectThreadContext, checkIsObviousAcknowledgement } from "@/src/services/threadReplyFilter";
+import {
+  detectThreadContext,
+  checkShouldSuppressReply,
+  isInternalSenderEmail,
+  type MessageKind,
+} from "@/src/services/threadReplyFilter";
 import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -15,15 +20,19 @@ export interface AutoTriageResult {
   classificationId: string | null;
   triageItemId: string | null;
   slackAction?: "posted" | "blocked" | "ignored";
-  // Set when this email is a reply linked to an existing triage item.
   linkedTriageItemId?: string | null;
+  messageKind?: MessageKind;
   error?: string;
 }
 
 // ─── Pipeline ────────────────────────────────────────────────────────────────
-// Idempotent: if classification + triage item already exist, skips silently.
-// If only classification exists (no triage item), skips re-classification.
-// Never throws — errors are caught, logged, and returned in the result.
+// Order of checks:
+//   1. Idempotency — already fully processed → skip
+//   2. Thread detection — is this a reply?
+//   3. Heuristic pre-filter — obvious internal ack/coordination → suppress before AI
+//   4. AI classification (with quoted content stripped, thread context injected)
+//   5. Deterministic guard — internal sender + existing tracked thread → suppress even if AI said urgent
+//   6. Route → Slack + triage item (only for emails that survive all guards)
 
 export async function runAutoTriagePipeline(
   inboundEmailId: string
@@ -33,7 +42,7 @@ export async function runAutoTriagePipeline(
 
   console.log(`[auto-triage] started email=${inboundEmailId} subject="${email.subject ?? "(none)"}"`);
 
-  // ── Idempotency: check existing state ───────────────────────────────────
+  // ── 1. Idempotency ────────────────────────────────────────────────────────
   const existingClassification = await getCurrentClassification(inboundEmailId);
   const existingTriageItem = await findByInboundEmailId(inboundEmailId);
 
@@ -47,10 +56,7 @@ export async function runAutoTriagePipeline(
       classificationId: existingClassification.id,
       eventType: "auto_triage_skipped",
       action: "Email already classified and triage item exists",
-      metadata: {
-        classification_id: existingClassification.id,
-        triage_item_id: existingTriageItem.id,
-      },
+      metadata: { classification_id: existingClassification.id, triage_item_id: existingTriageItem.id },
     });
     return {
       inboundEmailId,
@@ -61,24 +67,28 @@ export async function runAutoTriagePipeline(
     };
   }
 
-  // ── Thread reply detection ───────────────────────────────────────────────
-  // Check BEFORE calling the AI to avoid burning tokens on obvious acks.
+  // ── 2. Thread detection ───────────────────────────────────────────────────
   const threadCtx = await detectThreadContext(email);
+  const linkedTriageItemId = threadCtx.existingTriageItem?.id ?? null;
+  const isInternalSender = isInternalSenderEmail(email.sender_email ?? "");
 
   if (threadCtx.isThreadReply) {
-    const ackCheck = checkIsObviousAcknowledgement(email);
-    const linkedTriageItemId = threadCtx.existingTriageItem?.id ?? null;
+    // ── 3. Heuristic pre-filter ─────────────────────────────────────────────
+    // Runs before any AI call. Catches obvious acks and internal coordination messages.
+    const suppress = checkShouldSuppressReply(email);
 
     console.log(
-      `[auto-triage] thread_reply email=${inboundEmailId}` +
+      `[auto-triage] isReply=true` +
       ` gmailMessageId=${email.gmail_message_id}` +
       ` gmailThreadId=${email.gmail_thread_id}` +
-      ` sender=${email.sender_email}` +
       ` subject="${email.subject ?? "(none)"}"` +
-      ` siblings=${threadCtx.priorMessageCount}` +
-      ` linkedTriageItemId=${linkedTriageItemId ?? "none"}` +
-      ` isAck=${ackCheck.isAcknowledgement}` +
-      ` ackReason=${ackCheck.reason}`
+      ` sender=${email.sender_email}` +
+      ` isInternalSender=${isInternalSender}` +
+      ` existingTriageItemId=${linkedTriageItemId ?? "none"}` +
+      ` newReplyBodyLength=${suppress.newReplyBodyLength}` +
+      ` messageKind=${suppress.messageKind}` +
+      ` suppressed=${suppress.shouldSuppress}` +
+      ` suppressionReason=${suppress.reason}`
     );
 
     await logEvent({
@@ -92,16 +102,24 @@ export async function runAutoTriagePipeline(
         linked_triage_item_id: linkedTriageItemId,
         sender: email.sender_email,
         subject: email.subject,
-        is_acknowledgement: ackCheck.isAcknowledgement,
-        ack_reason: ackCheck.reason,
+        is_internal_sender: isInternalSender,
+        new_reply_body_length: suppress.newReplyBodyLength,
+        message_kind: suppress.messageKind,
+        suppressed: suppress.shouldSuppress,
+        suppression_reason: suppress.reason,
       },
     });
 
-    if (ackCheck.isAcknowledgement) {
-      // Log the suppression with all required fields for debugging.
+    if (suppress.shouldSuppress) {
+      const suppressEvent =
+        suppress.messageKind === "internal_coordination"
+          ? "reply_suppressed_internal_coordination"
+          : "reply_suppressed_as_acknowledgement";
+
       console.log(
         `[auto-triage] suppressed=true` +
-        ` suppressedReason=internal_acknowledgement_reply` +
+        ` suppressionReason=${suppress.reason}` +
+        ` messageKind=${suppress.messageKind}` +
         ` email=${inboundEmailId}` +
         ` gmailMessageId=${email.gmail_message_id}` +
         ` gmailThreadId=${email.gmail_thread_id}` +
@@ -112,16 +130,18 @@ export async function runAutoTriagePipeline(
 
       await logEvent({
         inboundEmailId,
-        eventType: "reply_suppressed_as_acknowledgement",
-        action: "Internal acknowledgement reply suppressed — no new Slack alert created",
-        reason: ackCheck.reason,
+        eventType: suppressEvent,
+        action: `Internal reply suppressed (heuristic) — no new Slack alert`,
+        reason: suppress.reason,
         metadata: {
           gmail_message_id: email.gmail_message_id,
           gmail_thread_id: email.gmail_thread_id,
           sender: email.sender_email,
           subject: email.subject,
           suppressed: true,
-          suppressed_reason: "internal_acknowledgement_reply",
+          suppressed_reason: suppress.reason,
+          message_kind: suppress.messageKind,
+          new_reply_body_length: suppress.newReplyBodyLength,
           linked_triage_item_id: linkedTriageItemId,
         },
       });
@@ -129,19 +149,18 @@ export async function runAutoTriagePipeline(
       return {
         inboundEmailId,
         skipped: true,
-        skipReason: "internal_acknowledgement_reply",
+        skipReason: suppress.reason,
         classificationId: null,
         triageItemId: null,
         linkedTriageItemId,
+        messageKind: suppress.messageKind,
       };
     }
 
-    // Non-suppressed reply (external sender, escalation signals, or body too long).
-    // Fall through to full classification with thread context so the model knows
-    // this is a follow-up — it should be harder to generate a new urgent alert.
+    // Not suppressed by heuristic — proceed to AI with thread context + stripped body.
     console.log(
-      `[auto-triage] thread_reply not suppressed — proceeding with classification` +
-      ` email=${inboundEmailId} ackReason=${ackCheck.reason}`
+      `[auto-triage] thread_reply proceeding to classification` +
+      ` email=${inboundEmailId} reason=${suppress.reason}`
     );
   }
 
@@ -153,7 +172,7 @@ export async function runAutoTriagePipeline(
       has_classification: !!existingClassification,
       has_triage_item: !!existingTriageItem,
       is_thread_reply: threadCtx.isThreadReply,
-      linked_triage_item_id: threadCtx.existingTriageItem?.id ?? null,
+      linked_triage_item_id: linkedTriageItemId,
     },
   });
 
@@ -162,17 +181,17 @@ export async function runAutoTriagePipeline(
   let slackAction: "posted" | "blocked" | "ignored" | undefined;
 
   try {
-    // ── Step 1: Classify ─────────────────────────────────────────────────
+    // ── 4. AI classification ──────────────────────────────────────────────────
+    // For thread replies, emailClassificationWorker strips quoted content before
+    // sending to the AI, so it classifies the new reply text only.
     if (!existingClassification) {
-      // Pass thread context so the model knows this is a reply and can downgrade urgency
-      // for non-escalating follow-ups.
       const classifyResult = await classifyEmailById(
         inboundEmailId,
         threadCtx.isThreadReply
           ? {
               isThreadReply: true,
               priorMessageCount: threadCtx.priorMessageCount,
-              existingTriageItemId: threadCtx.existingTriageItem?.id ?? null,
+              existingTriageItemId: linkedTriageItemId,
               existingTriageStatus: threadCtx.existingTriageItem?.status ?? null,
             }
           : undefined
@@ -193,7 +212,55 @@ export async function runAutoTriagePipeline(
       );
     }
 
-    // ── Step 2: Route → Slack + triage item ──────────────────────────────
+    // ── 5. Deterministic guard ────────────────────────────────────────────────
+    // Belt-and-suspenders: even if the AI returned "urgent" (e.g. because it glimpsed
+    // residual quoted content), an internal-sender reply on an already-tracked thread
+    // must never generate a new Slack alert. This guard is AI-proof.
+    if (
+      threadCtx.isThreadReply &&
+      threadCtx.existingTriageItem &&
+      isInternalSender
+    ) {
+      console.log(
+        `[auto-triage] suppressed=true` +
+        ` suppressionReason=internal_reply_in_tracked_thread` +
+        ` email=${inboundEmailId}` +
+        ` gmailMessageId=${email.gmail_message_id}` +
+        ` gmailThreadId=${email.gmail_thread_id}` +
+        ` sender=${email.sender_email}` +
+        ` subject="${email.subject ?? "(none)"}"` +
+        ` linkedTriageItemId=${linkedTriageItemId}`
+      );
+
+      await logEvent({
+        inboundEmailId,
+        classificationId,
+        eventType: "reply_suppressed_internal_coordination",
+        action: "Internal reply in tracked thread suppressed (deterministic guard) — no new Slack alert",
+        reason: "internal_reply_in_tracked_thread",
+        metadata: {
+          gmail_message_id: email.gmail_message_id,
+          gmail_thread_id: email.gmail_thread_id,
+          sender: email.sender_email,
+          subject: email.subject,
+          suppressed: true,
+          suppressed_reason: "internal_reply_in_tracked_thread",
+          linked_triage_item_id: linkedTriageItemId,
+          classification_id: classificationId,
+        },
+      });
+
+      return {
+        inboundEmailId,
+        skipped: true,
+        skipReason: "internal_reply_in_tracked_thread",
+        classificationId,
+        triageItemId: null,
+        linkedTriageItemId,
+      };
+    }
+
+    // ── 6. Route → Slack + triage item ────────────────────────────────────────
     if (!existingTriageItem) {
       const routeResult = await routeClassifiedEmail(inboundEmailId);
       triageItemId = routeResult.triageItemId ?? null;
@@ -211,7 +278,6 @@ export async function runAutoTriagePipeline(
       );
     }
 
-    // ── Done ─────────────────────────────────────────────────────────────
     await logEvent({
       inboundEmailId,
       classificationId,
@@ -236,7 +302,7 @@ export async function runAutoTriagePipeline(
       classificationId,
       triageItemId,
       slackAction,
-      linkedTriageItemId: threadCtx.existingTriageItem?.id ?? null,
+      linkedTriageItemId,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -5,17 +5,95 @@ import { getInternalDomains } from "@/src/config/env";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Grata's own domain is always treated as internal regardless of INTERNAL_EMAIL_DOMAINS.
 const GRATA_DOMAIN = "grata.life";
 
-// If the unquoted body exceeds this, don't auto-suppress (let the model decide).
-const ACK_MAX_CHARS = 400;
+// Max length of the stripped new-reply body before we stop auto-suppressing
+// and let the AI decide (internal sender only).
+const MAX_SUPPRESS_CHARS = 500;
 
-// Common reply subject prefixes across email clients.
+// Reply subject prefixes across email clients.
 const REPLY_SUBJECT_RE = /^(re|fwd|fw|aw|antw|sv|rv|tr)\s*:\s*/i;
 
-// Signals that a reply is actually escalating the issue — block auto-suppression even
-// if the sender is internal and the body is short.
+// ─── Quote stripping ──────────────────────────────────────────────────────────
+// Removes quoted thread history from a reply body, leaving only the new text.
+
+// Detect the line index where the quoted section begins.
+function findQuoteStart(lines: string[]): number {
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trimStart();
+
+    // "On [date], [name] wrote:" — Gmail / Apple Mail standard
+    if (/^On .{10,} wrote:?\s*$/i.test(t)) return i;
+
+    // Gmail sometimes splits "On ... wrote:" across two lines
+    if (/^On .{10,}$/.test(t) && i + 1 < lines.length) {
+      const next = lines[i + 1].trim();
+      if (/wrote:?\s*$/i.test(next)) return i;
+    }
+
+    // Outlook "From: X  Sent: Y  To: Z  Subject: W" block
+    if (/^From:\s+\S/i.test(t)) {
+      const lookahead = lines.slice(i, i + 5).join(" ");
+      if (/Sent:\s/i.test(lookahead) && /Subject:\s/i.test(lookahead)) return i;
+    }
+
+    // Horizontal separators: "--- Original Message ---", "________", "━━━━━━"
+    if (/^[-_—━=]{3,}\s*(original message|forwarded|begin forwarded)?[-_—━=]*\s*$/i.test(t)) return i;
+
+    // A > quote line preceded by a blank line (start of quoted block)
+    if (t.startsWith(">") && (i === 0 || lines[i - 1].trim() === "")) return i;
+
+    // Two consecutive > lines = start of a block even without blank separator
+    if (t.startsWith(">") && i + 1 < lines.length && lines[i + 1].trimStart().startsWith(">")) return i;
+  }
+  return -1;
+}
+
+// Remove email signature block (everything after a standalone "--", "—", or mobile-signature phrase).
+function stripSignature(lines: string[]): string[] {
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t === "--" || t === "—" || t === "___") return lines.slice(0, i);
+    if (/^get (outlook|mail) for (ios|android|iphone|ipad)/i.test(t)) return lines.slice(0, i);
+    if (/^sent from my (iphone|ipad|android|samsung|pixel|mobile|blackberry)/i.test(t)) return lines.slice(0, i);
+  }
+  return lines;
+}
+
+// Extract only the newly written reply text, stripping quoted history and signatures.
+// This is the body we send to the AI for thread replies so it classifies the reply,
+// not the original issue that may be quoted in the thread.
+export function extractNewReplyBody(rawBody: string): string {
+  if (!rawBody.trim()) return "";
+
+  const lines = rawBody.split("\n");
+
+  // Cut at the first quoted-section marker
+  const quoteStart = findQuoteStart(lines);
+  const beforeQuote = quoteStart >= 0 ? lines.slice(0, quoteStart) : lines;
+
+  // Filter any stray "> " lines that appeared before the main quoted block
+  const withoutQuoteLines = beforeQuote.filter(l => !l.trimStart().startsWith(">"));
+
+  // Remove signature
+  const withoutSig = stripSignature(withoutQuoteLines);
+
+  return withoutSig.join("\n").trim();
+}
+
+// ─── Sender classification ────────────────────────────────────────────────────
+
+export function isInternalSenderEmail(senderEmail: string): boolean {
+  const domain = senderEmail.split("@")[1]?.toLowerCase() ?? "";
+  if (!domain) return false;
+  if (domain === GRATA_DOMAIN) return true;
+  return getInternalDomains().includes(domain);
+}
+
+// ─── Signal matching ──────────────────────────────────────────────────────────
+
+// Signals indicating the reply is a genuine escalation. Block suppression even for
+// internal senders when these appear in the stripped new reply body.
 const ESCALATION_SIGNALS: RegExp[] = [
   /still (not fixed|broken|happening|locked out|down|offline|unresolved|blocked)/i,
   /still (no (response|update|solution|fix))/i,
@@ -28,14 +106,13 @@ const ESCALATION_SIGNALS: RegExp[] = [
   /no one has (responded|replied|looked|followed up)/i,
   /\d+ hours? (later|and still)/i,
   /escalat/i,
-  /urgent(ly)?/i,
   /all (residents?|tenants?|occupants?)/i,
   /everyone (is|can'?t|cannot)/i,
   /blocking (launch|deploy|release)/i,
   /production (is )?down/i,
 ];
 
-// Patterns for simple acknowledgements. Matched against the body with quoted lines stripped.
+// Classic acknowledgement patterns.
 const ACK_PATTERNS: RegExp[] = [
   /^thank(s| you) for (flagging|reaching out|letting us know|the (heads[ -]?up|update|report))/i,
   /thank(s| you)[,!.]?\s*(we|i|our team)\s*(will|are|can)\s+(investigate|look|follow up|check|get back|take a look|be in touch|update)/i,
@@ -50,59 +127,72 @@ const ACK_PATTERNS: RegExp[] = [
   /^(sounds good|got it|perfect|great)[,!.]?\s*$/i,
 ];
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// Internal coordination patterns — routing, diagnosis, team hand-off.
+// These cover cases like "Must be an IP change again - copying @Ved and @Amaan to support".
+const INTERNAL_COORDINATION_PATTERNS: RegExp[] = [
+  // Technical diagnosis hand-off
+  /must be (a|an) /i,
+  /looks? like (a|an) /i,
+  /think(ing)? this (is|might be|could be)/i,
+  /probably (a|an) /i,
+  /likely (a|an) /i,
+  /this (is |might be |could be )(a|an) /i,
 
-function senderDomain(email: InboundEmail): string {
-  return (email.sender_email ?? "").split("@")[1]?.toLowerCase() ?? "";
-}
+  // Routing people into the thread
+  /(copying|cc[''-]?ing|looping in|adding|paging|tagging|bringing in) @?\w/i,
+  /cc[''-]?d @?\w/i,
+  /loop(ing|ed) in/i,
 
-function isInternalSender(email: InboundEmail): boolean {
-  const domain = senderDomain(email);
-  if (!domain) return false;
-  if (domain === GRATA_DOMAIN) return true;
-  const configured = getInternalDomains();
-  return configured.includes(domain);
-}
+  // Hand-off verbs
+  /^(moving|forwarding|escalating|routing|handing off) (this )?to \w/i,
+  /^(reached out|pinged|contacted|emailed|messaged) (to )?\w/i,
+  /(will |going to )?(reach out|ping|contact|message|email) (to )?\w/i,
+  /^(asked|asking) \w+ to (look|check|investigate|handle|take a look)/i,
 
-// Strip quoted reply lines ("> text", "On ... wrote:") before evaluating body length/patterns.
-function stripQuotedText(body: string): string {
-  return body
-    .split("\n")
-    .filter(line => {
-      const t = line.trimStart();
-      return !t.startsWith(">") && !t.startsWith("On ") && !t.match(/^-{3,}Original/i);
-    })
-    .join("\n")
-    .trim();
-}
+  // FYI / heads-up
+  /^fyi[,!:.]?\s/i,
+  /^(heads[ -]?up)[,!:.]?\s/i,
+  /^(just (a )?)?fyi[,!.]?\s*$/i,
+
+  // Simple follow-ups / checking in
+  /^(following up|circling back|checking in)[,.]?\s/i,
+  /^(any update|any news|any word)\??\.?\s*$/i,
+];
 
 function hasEscalationSignals(text: string): boolean {
   return ESCALATION_SIGNALS.some(p => p.test(text));
 }
 
 function matchesAckPattern(text: string): boolean {
-  // Strip leading salutation ("Hi Tracey," / "Dear John,") before matching
-  const withoutSalutation = text.replace(/^(hi|hello|hey|dear)\s+\w+[,.]?\s*/i, "").trim();
-  return (
-    ACK_PATTERNS.some(p => p.test(withoutSalutation)) ||
-    ACK_PATTERNS.some(p => p.test(text))
-  );
+  const stripped = text.replace(/^(hi|hello|hey|dear)\s+\w+[,.]?\s*/i, "").trim();
+  return ACK_PATTERNS.some(p => p.test(stripped)) || ACK_PATTERNS.some(p => p.test(text));
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+function matchesCoordinationPattern(text: string): boolean {
+  return INTERNAL_COORDINATION_PATTERNS.some(p => p.test(text));
+}
+
+// ─── Message kind ─────────────────────────────────────────────────────────────
+
+export type MessageKind =
+  | "original_issue_report"
+  | "internal_acknowledgement"
+  | "internal_coordination"
+  | "internal_escalation"
+  | "external_customer_update"
+  | "external_escalation"
+  | "unknown_reply";
+
+// ─── Thread context detection ─────────────────────────────────────────────────
 
 export interface ThreadContext {
   isThreadReply: boolean;
-  priorMessageCount: number;   // other emails already stored for this thread
+  priorMessageCount: number;
   existingTriageItem: TriageItem | null;
 }
 
-// Looks up thread siblings and existing triage item in the DB.
-// Returns quickly for non-reply emails (no gmail_thread_id → not a reply).
 export async function detectThreadContext(email: InboundEmail): Promise<ThreadContext> {
   const threadId = email.gmail_thread_id;
-
-  // No thread ID: definitely not a reply.
   if (!threadId) {
     return { isThreadReply: false, priorMessageCount: 0, existingTriageItem: null };
   }
@@ -116,56 +206,107 @@ export async function detectThreadContext(email: InboundEmail): Promise<ThreadCo
   }
 
   const existingTriageItem = await triageItemsRepo.findOpenByThreadId(threadId, email.id);
-
   return { isThreadReply: true, priorMessageCount: priorCount, existingTriageItem };
 }
 
-export interface AckCheckResult {
-  isAcknowledgement: boolean;
+// ─── Suppression check ────────────────────────────────────────────────────────
+
+export interface SuppressCheckResult {
+  shouldSuppress: boolean;
+  messageKind: MessageKind;
   reason: string;
+  newReplyBody: string;        // quote-stripped body used for the check
+  newReplyBodyLength: number;
 }
 
-// Heuristic check: is this an obvious internal acknowledgement that should not produce a new Slack alert?
+// Determines whether a thread reply from an internal sender should be suppressed
+// before any AI call. External senders are never suppressed here — they go through
+// full AI classification with thread context.
 //
-// Only auto-suppresses when:
-//   1. Sender is internal (@grata.life or INTERNAL_EMAIL_DOMAINS)
-//   2. No escalation signals in the body
-//   3. Body (without quoted text) is short and matches an ack pattern, OR is empty
+// Suppresses when the new reply body (after stripping quoted content) is:
+//  - Empty / only quoted text
+//  - Matches a classic acknowledgement pattern ("thanks, noted, received...")
+//  - Matches an internal coordination pattern ("copying X", "must be an IP change", ...)
 //
-// External senders always go through full AI classification, even for short replies.
-export function checkIsObviousAcknowledgement(email: InboundEmail): AckCheckResult {
-  if (!isInternalSender(email)) {
-    return { isAcknowledgement: false, reason: "external_sender" };
-  }
-
+// Never suppresses when escalation signals are detected ("still broken", "urgent", ...).
+export function checkShouldSuppressReply(email: InboundEmail): SuppressCheckResult {
   const rawBody = (email.body_text ?? email.snippet ?? "").trim();
+  const newReplyBody = extractNewReplyBody(rawBody);
+  const newReplyBodyLength = newReplyBody.length;
 
-  // Empty body from internal sender in a thread → suppress
-  if (!rawBody) {
-    return { isAcknowledgement: true, reason: "empty_body_internal_reply" };
+  if (!isInternalSenderEmail(email.sender_email ?? "")) {
+    return {
+      shouldSuppress: false,
+      messageKind: "external_customer_update",
+      reason: "external_sender",
+      newReplyBody,
+      newReplyBodyLength,
+    };
   }
 
-  const body = stripQuotedText(rawBody);
-
-  // If the stripped body is still empty (e.g. sender only quoted), suppress
-  if (!body) {
-    return { isAcknowledgement: true, reason: "quoted_only_internal_reply" };
+  if (!newReplyBody) {
+    return {
+      shouldSuppress: true,
+      messageKind: "internal_acknowledgement",
+      reason: "empty_new_reply_body",
+      newReplyBody,
+      newReplyBodyLength,
+    };
   }
 
-  // Any escalation signal → never suppress
-  if (hasEscalationSignals(body)) {
-    return { isAcknowledgement: false, reason: "escalation_signals_detected" };
+  if (hasEscalationSignals(newReplyBody)) {
+    return {
+      shouldSuppress: false,
+      messageKind: "internal_escalation",
+      reason: "escalation_signals_detected",
+      newReplyBody,
+      newReplyBodyLength,
+    };
   }
 
-  // Body too long → send to AI
-  if (body.length > ACK_MAX_CHARS) {
-    return { isAcknowledgement: false, reason: "body_too_long" };
+  if (newReplyBody.length > MAX_SUPPRESS_CHARS) {
+    return {
+      shouldSuppress: false,
+      messageKind: "unknown_reply",
+      reason: "body_too_long_for_heuristic",
+      newReplyBody,
+      newReplyBodyLength,
+    };
   }
 
-  // Short body + matches ack pattern → suppress
-  if (matchesAckPattern(body)) {
-    return { isAcknowledgement: true, reason: "matches_acknowledgement_pattern" };
+  if (matchesAckPattern(newReplyBody)) {
+    return {
+      shouldSuppress: true,
+      messageKind: "internal_acknowledgement",
+      reason: "matches_acknowledgement_pattern",
+      newReplyBody,
+      newReplyBodyLength,
+    };
   }
 
-  return { isAcknowledgement: false, reason: "no_ack_pattern_matched" };
+  if (matchesCoordinationPattern(newReplyBody)) {
+    return {
+      shouldSuppress: true,
+      messageKind: "internal_coordination",
+      reason: "matches_coordination_pattern",
+      newReplyBody,
+      newReplyBodyLength,
+    };
+  }
+
+  return {
+    shouldSuppress: false,
+    messageKind: "unknown_reply",
+    reason: "no_suppression_pattern_matched",
+    newReplyBody,
+    newReplyBodyLength,
+  };
+}
+
+// Backward-compatible alias used by existing callers.
+export function checkIsObviousAcknowledgement(
+  email: InboundEmail
+): { isAcknowledgement: boolean; reason: string } {
+  const r = checkShouldSuppressReply(email);
+  return { isAcknowledgement: r.shouldSuppress, reason: r.reason };
 }
