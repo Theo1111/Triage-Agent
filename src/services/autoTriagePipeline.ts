@@ -17,7 +17,7 @@ import {
   checkShouldSuppressReply,
   checkIsClosureReply,
   checkIsCustomerEscalation,
-  checkIsNoisyExternalReply,
+  checkIsCustomerAcknowledgement,
   extractNewReplyBody,
   isInternalSenderEmail,
   type MessageKind,
@@ -181,35 +181,39 @@ export async function runAutoTriagePipeline(
         ? `${email.sender_name} <${email.sender_email ?? "unknown"}>`
         : (email.sender_email ?? "Unknown sender");
 
-    // Pure noise ("Thanks", "OK", "Got it") — discard without any Slack output.
-    if (checkIsNoisyExternalReply(replyBody)) {
+    // Customer acknowledgements ("Okay, thank you!", "Sounds good, thanks!", …)
+    // — store the email, link to the triage item, but do NOT post any Slack output.
+    // Signatures are stripped inside extractNewReplyBody before this check runs.
+    if (checkIsCustomerAcknowledgement(replyBody)) {
       console.log(
-        `[auto-triage] external_noise suppressed email=${inboundEmailId}` +
+        `[auto-triage] customer_acknowledgement suppressed email=${inboundEmailId}` +
         ` sender=${email.sender_email}` +
         ` triage=${linkedTriageItemId}` +
-        ` body="${replyBody.slice(0, 60)}"`
+        ` body="${replyBody.slice(0, 80)}"`
       );
       await logEvent({
         inboundEmailId: email.id,
-        eventType: "reply_suppressed_external_noise",
+        eventType: "reply_suppressed_customer_acknowledgement",
         actorType: "system",
         actorId: email.sender_email ?? "unknown",
-        action: "External reply suppressed as noise — short ACK with no actionable content",
-        reason: "external_noise",
+        action: "Customer acknowledgement suppressed — no actionable content, no Slack output",
+        reason: "customer_acknowledgement",
         metadata: {
+          gmail_message_id: email.gmail_message_id,
           gmail_thread_id: email.gmail_thread_id,
           linked_triage_item_id: linkedTriageItemId,
-          reply_body_preview: replyBody.slice(0, 100),
+          cleaned_reply_text: replyBody.slice(0, 200),
+          sender: email.sender_email,
         },
       });
       return {
         inboundEmailId,
         skipped: true,
-        skipReason: "external_noise",
+        skipReason: "customer_acknowledgement",
         classificationId: null,
         triageItemId: linkedTriageItemId,
         linkedTriageItemId,
-        messageKind: "customer_update" as MessageKind,
+        messageKind: "customer_acknowledgement" as MessageKind,
       };
     }
 

@@ -49,15 +49,84 @@ function findQuoteStart(lines: string[]): number {
   return -1;
 }
 
-// Remove email signature block (everything after a standalone "--", "—", or mobile-signature phrase).
+// Standard email sign-off phrases that begin a signature block.
+const SIGN_OFF_RE =
+  /^(best( regards| wishes)?|kind regards|sincerely|regards|cheers|warm(est)? regards|yours (truly|faithfully)|best[,.]?|warmly|thank(s| you) and regards)[,.]?\s*$/i;
+
+// Individual lines that are typical inside a signature block.
+function looksLikeSignatureLine(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  if (SIGN_OFF_RE.test(t)) return true;
+  // Phone numbers (North American + international)
+  if (/\b(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b/.test(t)) return true;
+  // Email addresses
+  if (/\b[\w.%+-]+@[\w.-]+\.[a-zA-Z]{2,}\b/.test(t)) return true;
+  // URLs
+  if (/https?:\/\/|www\./i.test(t)) return true;
+  // mailto: links (common in HTML-to-text conversion)
+  if (/mailto:/i.test(t)) return true;
+  // Pipe / bullet separators common in signatures ("Name | Title | Company")
+  if (/[|•·]/.test(t)) return true;
+  // Legal disclaimers
+  if (/\b(confidential|disclaimer|privileged|intended recipient|do not (share|distribute|forward))/i.test(t)) return true;
+  return false;
+}
+
+// Remove email signature block.
+//
+// Handles:
+//   1. Standard markers: "--", "—", "___", mobile app signatures.
+//   2. Heuristic backward-scan: trailing blocks separated by a blank line that
+//      (a) start with a sign-off phrase ("Regards,", "Best,", …), or
+//      (b) contain ≥ 2 non-blank lines and ≥ 2 of them look like contact info
+//          (phone, email, URL, mailto, pipe-separated, disclaimer).
+//
+// Scans from the bottom up so multi-paragraph messages aren't over-stripped.
 function stripSignature(lines: string[]): string[] {
+  // Standard markers
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
     if (t === "--" || t === "—" || t === "___") return lines.slice(0, i);
     if (/^get (outlook|mail) for (ios|android|iphone|ipad)/i.test(t)) return lines.slice(0, i);
     if (/^sent from my (iphone|ipad|android|samsung|pixel|mobile|blackberry)/i.test(t)) return lines.slice(0, i);
   }
-  return lines;
+
+  // Backward-scanning heuristic
+  let end = lines.length;
+
+  while (end > 1) {
+    // Move past trailing blank lines to find where this last block ends
+    let blockEnd = end;
+    while (blockEnd > 0 && !lines[blockEnd - 1].trim()) blockEnd--;
+    if (blockEnd === 0) break;
+
+    // Find the start of this block (back to the nearest blank line or beginning)
+    let blockStart = blockEnd - 1;
+    while (blockStart > 0 && lines[blockStart - 1].trim()) blockStart--;
+
+    const blockLines = lines.slice(blockStart, blockEnd);
+    const nonBlank = blockLines.filter(l => l.trim());
+
+    // Block starts with a sign-off phrase → definitely a signature
+    if (nonBlank.length >= 1 && SIGN_OFF_RE.test(nonBlank[0].trim())) {
+      end = blockStart;
+      while (end > 0 && !lines[end - 1].trim()) end--;
+      continue;
+    }
+
+    // Block has ≥ 2 non-blank lines and ≥ 2 of them look like contact info
+    const sigCount = nonBlank.filter(l => looksLikeSignatureLine(l)).length;
+    if (nonBlank.length >= 2 && sigCount >= 2) {
+      end = blockStart;
+      while (end > 0 && !lines[end - 1].trim()) end--;
+      continue;
+    }
+
+    break;
+  }
+
+  return lines.slice(0, end);
 }
 
 // Extract only the newly written reply text, stripping quoted history and signatures.
@@ -271,10 +340,72 @@ export function checkIsNoisyExternalReply(strippedBody: string): boolean {
   return EXTERNAL_NOISE_PATTERNS.some(p => p.test(trimmed));
 }
 
+// ─── Customer acknowledgement detection ─────────────────────────────────────
+// Patterns for replies that are purely polite acknowledgements with no
+// actionable content — "Okay, thank you!", "Sounds good, thanks!", etc.
+// Applied AFTER signature and quote stripping.
+
+const MAX_CUSTOMER_ACK_CHARS = 300;
+
+const CUSTOMER_ACK_PATTERNS: RegExp[] = [
+  // Pure thanks
+  /^thank(s| you)[!.,]?\s*$/i,
+  /^(thanks|thank you) (so much|very much|a lot)[!.,]?\s*$/i,
+  /^(thanks|thank you) for (your (help|time|response|quick response|assistance|support|patience|update)|getting back|reaching out|the update|the heads[-\s]?up|looking into (this|it)|the quick turnaround)[!.,]?\s*$/i,
+
+  // "Okay / Ok" + thanks
+  /^(ok(ay)?)[,!.]?\s+thank(s| you)[!.,]?\s*$/i,
+
+  // Great / Perfect / Wonderful + optional thanks
+  /^(great|perfect|wonderful|excellent|fantastic|brilliant)[,!.]?\s*(thank(s| you)[!.,]?)?\s*$/i,
+
+  // Sounds good / Looks good / That works + optional thanks
+  /^(sounds good|looks good|that works|that'?s fine|that'?s great)[,!.]?\s*(thank(s| you)[!.,]?)?\s*$/i,
+
+  // Got it / Understood / Noted + optional thanks
+  /^(got it|understood|noted|confirmed|acknowledged|received)[,!.]?\s*(thank(s| you)[!.,]?)?\s*$/i,
+
+  // Will do / Sure / Of course + optional thanks
+  /^(will do|sure|of course|absolutely|no problem|sure thing|my pleasure)[,!.]?\s*(thank(s| you)[!.,]?)?\s*$/i,
+
+  // Appreciate it
+  /^(i |we )?appreciate (it|that|this|your (help|response|time|patience|assistance|quick response|support|update))[!.,]?\s*$/i,
+
+  // Have a good/great day + optional thanks
+  /^(thanks?[!.,]\s+)?have a (great|good|nice|wonderful) (day|week|weekend|evening|rest of [a-z\s]+)[!.,]?\s*$/i,
+  /^have a (great|good|nice|wonderful) (day|week|weekend|evening)[,!.]?\s*(thank(s| you)[!.,]?)?\s*$/i,
+
+  // "Thank you, have a great day" combos
+  /^thank(s| you)[,!.]\s+(and )?have a (great|good|nice|wonderful) (day|week|weekend|evening)[!.,]?\s*$/i,
+
+  // "Great, thank you" / "Perfect, thank you"
+  /^(great|perfect|sounds good|got it|wonderful)[,!]\s+thank(s| you)[!.,]?\s*$/i,
+];
+
+// Returns true if the stripped reply body is purely a customer acknowledgement
+// (thanks, confirmation of receipt, polite closing) with no actionable content.
+// Run this on extractNewReplyBody() output — signatures and quotes already removed.
+export function checkIsCustomerAcknowledgement(strippedBody: string): boolean {
+  const trimmed = strippedBody.trim();
+  // Empty body after stripping → nothing actionable
+  if (!trimmed) return true;
+  // Long messages are unlikely to be purely acknowledgements
+  if (trimmed.length > MAX_CUSTOMER_ACK_CHARS) return false;
+  // Strip leading greeting ("Hi John," / "Hello,") before pattern matching
+  const withoutGreeting = trimmed
+    .replace(/^(hi|hello|hey|dear)\s+[\w]+[,.]?\s*/i, "")
+    .trim();
+  return (
+    CUSTOMER_ACK_PATTERNS.some(p => p.test(withoutGreeting)) ||
+    CUSTOMER_ACK_PATTERNS.some(p => p.test(trimmed))
+  );
+}
+
 // ─── Message kind ─────────────────────────────────────────────────────────────
 
 export type MessageKind =
   | "original_issue_report"
+  | "customer_acknowledgement"
   | "internal_acknowledgement"
   | "internal_coordination"
   | "internal_escalation"
@@ -283,6 +414,7 @@ export type MessageKind =
   | "customer_update"
   | "customer_escalation"
   | "reporter_confirmed_resolved"
+  | "duplicate_thread_reply"
   | "unknown_reply";
 
 // ─── Thread context detection ─────────────────────────────────────────────────
