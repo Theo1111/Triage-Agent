@@ -1,15 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { usePathname } from "next/navigation";
 import FilterBar from "./FilterBar";
 import TriageTable from "./TriageTable";
 import { TEAM_CATEGORIES } from "@/src/config/roles";
-import type { SerializedTriageItem, TabCounts } from "./types";
+import { computeCounts } from "./utils";
+import type { SerializedTriageItem } from "./types";
+import styles from "./dashboard.module.css";
 
 // ── Client-side filtering ──────────────────────────────────────────────────────
-// Mirrors the server-side WHERE logic in page.tsx fetchAllItems so switching
-// tabs is instant — no network round-trip needed.
 
 function filterItems(
   all: SerializedTriageItem[],
@@ -40,7 +40,6 @@ function filterItems(
         !(CLOSED as readonly string[]).includes(i.status)
     );
   } else {
-    // "all" — open items only
     items = items.filter(i => !(CLOSED as readonly string[]).includes(i.status));
   }
 
@@ -58,49 +57,129 @@ function filterItems(
   return items;
 }
 
+// ── Stat card ──────────────────────────────────────────────────────────────────
+
+function StatCard({
+  label,
+  value,
+  alert,
+  positive,
+}: {
+  label: string;
+  value: number | string;
+  alert?: boolean;
+  positive?: boolean;
+}) {
+  let cls = styles.statCard;
+  if (alert)    cls += ` ${styles.statAlert}`;
+  if (positive) cls += ` ${styles.statPositive}`;
+  return (
+    <div className={cls}>
+      <div className={styles.statValue}>{value}</div>
+      <div className={styles.statLabel}>{label}</div>
+    </div>
+  );
+}
+
+function formatAge(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(ms / 86_400_000)}d`;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface Props {
   initialItems: SerializedTriageItem[];
-  counts: TabCounts;
   initialTeam: string;
   initialSearch: string;
+  hasDbError: boolean;
+  dbErrorMessage: string | null;
 }
 
 export default function DashboardClient({
   initialItems,
-  counts,
   initialTeam,
   initialSearch,
+  hasDbError,
+  dbErrorMessage,
 }: Props) {
-  const router   = useRouter();
   const pathname = usePathname();
 
   const [activeTeam, setActiveTeam] = useState(initialTeam);
   const [search,     setSearch]     = useState(initialSearch);
   const [allItems,   setAllItems]   = useState(initialItems);
+  const [refreshError, setRefreshError] = useState<string | null>(
+    hasDbError ? (dbErrorMessage ?? "Failed to load dashboard data") : null
+  );
+  const refreshingRef = useRef(false);
 
-  // When server rerenders (router.refresh()), pull in fresh items + counts.
-  useEffect(() => {
-    setAllItems(initialItems);
-  }, [initialItems]);
+  // Counts are derived from allItems — no second DB query needed.
+  const counts = useMemo(() => computeCounts(allItems), [allItems]);
 
-  // Light polling — refreshes counts and picks up Slack-side changes within 60s.
+  // When DashboardHeaderActions triggers router.refresh() (after an email sync),
+  // the server re-renders and new initialItems arrive via props.
+  // Only accept them when the server fetch succeeded — on DB error, keep the
+  // current items visible (last-known-good data).
   useEffect(() => {
-    const id = setInterval(() => router.refresh(), 60_000);
+    if (!hasDbError) {
+      setAllItems(initialItems);
+      setRefreshError(null);
+      console.log(`[dashboard] server refresh received items=${initialItems.length}`);
+    } else {
+      console.warn("[dashboard] server refresh returned DB error — keeping last-known-good data");
+      setRefreshError(dbErrorMessage ?? "Refresh failed — showing last known data");
+    }
+  }, [initialItems, hasDbError, dbErrorMessage]);
+
+  // Fetches fresh data from the API endpoint without a full server re-render.
+  // Used for 60s polling and post-action refreshes.
+  const fetchFreshData = useCallback(async () => {
+    if (refreshingRef.current) {
+      console.log("[dashboard] refresh already in progress, skipping");
+      return;
+    }
+    refreshingRef.current = true;
+    console.log("[dashboard] API fetch started");
+    try {
+      const res = await fetch("/api/dashboard/data");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const payload = await res.json() as { ok: boolean; items?: SerializedTriageItem[]; error?: string };
+      if (!payload.ok || !payload.items) throw new Error(payload.error ?? "No data");
+      setAllItems(payload.items);
+      setRefreshError(null);
+      console.log(`[dashboard] API fetch completed items=${payload.items.length}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      console.error("[dashboard] API fetch failed:", msg);
+      // Do NOT clear allItems — keep whatever was last successfully loaded.
+      setRefreshError("Refresh failed — showing last known data");
+    } finally {
+      refreshingRef.current = false;
+    }
+  }, []);
+
+  // 60s polling — picks up Slack-side changes and new incoming emails.
+  useEffect(() => {
+    const id = setInterval(fetchFreshData, 60_000);
     return () => clearInterval(id);
-  }, [router]);
+  }, [fetchFreshData]);
 
-  // Update URL so tabs are bookmarkable and back-button works.
+  // Update the URL so tabs are bookmarkable and back-button works, but use
+  // window.history.replaceState instead of router.replace so that Next.js does
+  // NOT treat it as a navigation — avoiding a full server re-render (and extra
+  // DB queries) on every search keystroke or tab switch.
   const updateUrl = useCallback(
     (team: string, q: string) => {
       const p = new URLSearchParams();
       if (team && team !== "all") p.set("team", team);
       if (q.trim()) p.set("search", q.trim());
       const qs = p.toString();
-      router.replace(`${pathname}${qs ? "?" + qs : ""}`, { scroll: false });
+      window.history.replaceState(null, "", `${pathname}${qs ? "?" + qs : ""}`);
     },
-    [router, pathname]
+    [pathname]
   );
 
   function handleTeamChange(team: string) {
@@ -119,27 +198,65 @@ export default function DashboardClient({
     );
   }
 
-  // Called after status-changing actions so counts update promptly.
+  // Called after status-changing actions — fetches fresh data via API so counts
+  // update promptly without a full server re-render.
   function handleRefresh() {
-    router.refresh();
+    fetchFreshData();
   }
 
   const items = filterItems(allItems, activeTeam, search);
 
+  const openItems    = allItems.filter(i => !["resolved", "archived", "ignored"].includes(i.status));
+  const oldestOpenMs = openItems.length > 0
+    ? Math.max(
+        ...openItems
+          .filter(i => i.status === "new")
+          .map(i => Date.now() - new Date(i.created_at).getTime()),
+        0
+      )
+    : 0;
+
   return (
     <>
-      <FilterBar
-        counts={counts}
-        activeTeam={activeTeam}
-        search={search}
-        onTeamChange={handleTeamChange}
-        onSearchChange={handleSearchChange}
-      />
-      <TriageTable
-        items={items}
-        onItemUpdated={handleItemUpdated}
-        onRefresh={handleRefresh}
-      />
+      {refreshError && (
+        <div className={styles.refreshErrorBanner}>
+          <span>⚠ {refreshError}</span>
+          <button
+            className={styles.refreshErrorDismiss}
+            onClick={() => setRefreshError(null)}
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      <div className={styles.statsGrid}>
+        <StatCard label="Total Open"     value={counts.all} />
+        <StatCard label="Urgent Open"    value={counts.urgent_open} alert={counts.urgent_open > 0} />
+        <StatCard label="Manual Review"  value={counts.manual_review} alert={counts.manual_review > 0} />
+        <StatCard label="Resolved"       value={counts.resolved} positive />
+        <StatCard
+          label="Oldest Unresolved"
+          value={oldestOpenMs > 0 ? formatAge(oldestOpenMs) : "—"}
+          alert={oldestOpenMs > 86_400_000}
+        />
+      </div>
+
+      <section className={styles.section}>
+        <FilterBar
+          counts={counts}
+          activeTeam={activeTeam}
+          search={search}
+          onTeamChange={handleTeamChange}
+          onSearchChange={handleSearchChange}
+        />
+        <TriageTable
+          items={items}
+          onItemUpdated={handleItemUpdated}
+          onRefresh={handleRefresh}
+        />
+      </section>
     </>
   );
 }

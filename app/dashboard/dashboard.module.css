@@ -50,6 +50,33 @@
   margin-bottom: 24px;
 }
 
+/* Shown when a background refresh fails but last-known-good data is preserved. */
+.refreshErrorBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 10px 16px;
+  color: #92400e;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+.refreshErrorDismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  font-size: 14px;
+  color: #92400e;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  opacity: 0.7;
+}
+.refreshErrorDismiss:hover { opacity: 1; }
+
 /* ── Stats cards ─────────────────────────────────────────────────────────── */
 .statsGrid {
   display: grid;
