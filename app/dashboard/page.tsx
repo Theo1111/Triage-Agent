@@ -1,4 +1,6 @@
-import { fetchAllItems } from "./fetchDashboardData";
+import { cookies } from "next/headers";
+import { fetchAllItemsForOperator } from "./fetchDashboardData";
+import { decodeCookie } from "@/src/lib/dashboardOperatorSession";
 import type { SerializedTriageItem } from "./types";
 import DashboardClient from "./DashboardClient";
 import DashboardHeaderActions from "./DashboardHeaderActions";
@@ -15,11 +17,21 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const initialTeam   = params.team   ?? "";
   const initialSearch = params.search ?? "";
 
+  // Read the operator from the HttpOnly session cookie for per-operator unread counts.
+  let operatorId: string | null = null;
+  try {
+    const cookieStore = await cookies();
+    const raw = cookieStore.get("dash_op_sess")?.value;
+    if (raw) operatorId = decodeCookie(raw);
+  } catch {
+    // Non-critical — dashboard still works without operator context.
+  }
+
   let allItems: SerializedTriageItem[] = [];
   let dbError: string | null = null;
 
   try {
-    allItems = await fetchAllItems();
+    allItems = await fetchAllItemsForOperator(operatorId);
   } catch (err) {
     const raw = err instanceof Error ? err.message : "Unknown database error";
     dbError = raw.includes("operator_profiles") || raw.includes("42P01")

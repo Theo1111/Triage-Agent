@@ -682,6 +682,75 @@ export async function runAutoTriagePipeline(
       };
     }
 
+    // ── 5.5. Thread failsafe ─────────────────────────────────────────────────
+    // Belt-and-suspenders: if this email is part of a thread that already has
+    // a triage item AND we haven't returned early in steps 2.5–2.7 or 5
+    // (e.g. an external sender's general question on a resolved thread that
+    // wasn't an ack or reopen signal), prevent creating a duplicate triage item.
+    if (!existingTriageItem && threadCtx.existingTriageItem) {
+      const linked = threadCtx.existingTriageItem;
+      const senderDisplay = email.sender_name
+        ? `${email.sender_name} <${email.sender_email ?? "unknown"}>`
+        : (email.sender_email ?? "Unknown sender");
+      const replyBody = extractNewReplyBody(
+        cleanEmailBodyForTriage(email.body_text ?? email.snippet ?? "")
+      );
+
+      let updatedItem = linked;
+      try {
+        updatedItem = await touchTriageItem(linked.id);
+      } catch (err) {
+        console.warn("[auto-triage] failsafe touchTriageItem failed (non-fatal):", err);
+      }
+
+      const botToken = process.env.SLACK_BOT_TOKEN;
+      if (botToken && linked.slack_channel && linked.slack_message_ts) {
+        const appBaseUrl = process.env.APP_BASE_URL?.replace(/\/$/, "");
+        const viewUrl = appBaseUrl ? `${appBaseUrl}/emails/${email.id}` : null;
+        const preview = replyBody.length > 400 ? replyBody.slice(0, 400) + "…" : replyBody;
+        const threadText = [
+          `🔄 *Update* — ${senderDisplay} replied`,
+          `>>> ${preview.replace(/\n+/g, "\n")}`,
+          viewUrl ? `<${viewUrl}|View Thread>` : null,
+        ].filter(Boolean).join("\n");
+        await postThreadReply(botToken, linked.slack_channel, linked.slack_message_ts, threadText)
+          .catch(err => console.warn("[auto-triage] failsafe slack reply failed (non-fatal):", err));
+      }
+
+      await logEvent({
+        inboundEmailId: email.id,
+        classificationId,
+        eventType: "duplicate_thread_update_linked",
+        actorType: "system",
+        actorId: email.sender_email ?? "unknown",
+        action: "Duplicate triage item prevented — email linked to existing thread item",
+        metadata: {
+          gmail_message_id: email.gmail_message_id,
+          gmail_thread_id: email.gmail_thread_id,
+          linked_triage_item_id: linked.id,
+          linked_triage_status: linked.status,
+          classification_id: classificationId,
+          sender: email.sender_email,
+          reply_body_preview: replyBody.slice(0, 200),
+        },
+      });
+
+      console.log(
+        `[auto-triage] failsafe: duplicate prevented email=${inboundEmailId}` +
+        ` linked to existing triage=${linked.id} status=${linked.status}`
+      );
+
+      return {
+        inboundEmailId,
+        skipped: true,
+        skipReason: "duplicate_prevented_by_thread_failsafe",
+        classificationId,
+        triageItemId: linked.id,
+        linkedTriageItemId: linked.id,
+        messageKind: "customer_update" as MessageKind,
+      };
+    }
+
     // ── 6. Route → Slack + triage item ────────────────────────────────────────
     if (!existingTriageItem) {
       const routeResult = await routeClassifiedEmail(inboundEmailId);

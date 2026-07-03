@@ -7,6 +7,10 @@ type ExtendedRow = TriageItem & {
   urgency_reason: string | null;
 };
 
+type ExtendedRowWithRead = ExtendedRow & {
+  has_unread_update: boolean;
+};
+
 function toISO(d: Date | null | undefined): string | null {
   if (!d) return null;
   return d instanceof Date ? d.toISOString() : String(d);
@@ -42,26 +46,69 @@ function serialize(row: ExtendedRow): SerializedTriageItem {
     restored_by: row.restored_by,
     primary_category: row.primary_category,
     urgency_reason: row.urgency_reason,
+    has_unread_update: false,
   };
 }
 
-// Single query — items already include primary_category via JOIN so counts can be
-// derived client-side without a second round-trip.
-export async function fetchAllItems(): Promise<SerializedTriageItem[]> {
-  console.log("[dashboard] DB fetch started");
+// ORDER BY clause shared by both variants.
+// When operatorId is provided, items with unread updates float above normal urgency sort.
+const BASE_ORDER = `
+  ORDER BY
+    CASE WHEN ti.escalated_at IS NOT NULL AND ti.status NOT IN ('resolved','archived','ignored') THEN 0 ELSE 1 END,
+    CASE ti.urgency_level WHEN 'urgent' THEN 0 ELSE 1 END,
+    ti.created_at DESC`;
+
+const OPERATOR_ORDER = `
+  ORDER BY
+    CASE WHEN ti.escalated_at IS NOT NULL AND ti.status NOT IN ('resolved','archived','ignored') THEN 0 ELSE 1 END,
+    CASE WHEN tior.last_viewed_at IS NOT NULL AND ti.updated_at > tior.last_viewed_at THEN 0 ELSE 1 END,
+    CASE ti.urgency_level WHEN 'urgent' THEN 0 ELSE 1 END,
+    ti.created_at DESC`;
+
+// Fetch items with per-operator unread state. When operatorId is null, all items
+// return has_unread_update=false and the sort falls back to the non-operator order.
+export async function fetchAllItemsForOperator(
+  operatorId: string | null
+): Promise<SerializedTriageItem[]> {
+  console.log(`[dashboard] DB fetch started operatorId=${operatorId ?? "none"}`);
+
+  if (operatorId) {
+    const rows = await query<ExtendedRowWithRead>(
+      `SELECT ti.*,
+              ec.primary_category,
+              ec.urgency_reason,
+              CASE
+                WHEN tior.last_viewed_at IS NOT NULL AND ti.updated_at > tior.last_viewed_at THEN true
+                ELSE false
+              END AS has_unread_update
+       FROM triage_items ti
+       LEFT JOIN email_classifications ec ON ec.id = ti.classification_id
+       LEFT JOIN triage_item_operator_reads tior
+              ON tior.triage_item_id = ti.id
+              AND tior.operator_profile_id = $1::uuid
+       ${OPERATOR_ORDER}
+       LIMIT 500`,
+      [operatorId]
+    );
+    console.log(`[dashboard] DB fetch completed items=${rows.length}`);
+    return rows.map(row => ({ ...serialize(row), has_unread_update: !!row.has_unread_update }));
+  }
+
   const rows = await query<ExtendedRow>(
     `SELECT ti.*,
             ec.primary_category,
             ec.urgency_reason
      FROM triage_items ti
      LEFT JOIN email_classifications ec ON ec.id = ti.classification_id
-     ORDER BY
-       CASE WHEN ti.escalated_at IS NOT NULL AND ti.status NOT IN ('resolved','archived','ignored') THEN 0 ELSE 1 END,
-       CASE ti.urgency_level WHEN 'urgent' THEN 0 ELSE 1 END,
-       ti.created_at DESC
+     ${BASE_ORDER}
      LIMIT 500`,
     []
   );
   console.log(`[dashboard] DB fetch completed items=${rows.length}`);
   return rows.map(serialize);
+}
+
+// Backward-compat alias for callers that don't have operator context.
+export async function fetchAllItems(): Promise<SerializedTriageItem[]> {
+  return fetchAllItemsForOperator(null);
 }

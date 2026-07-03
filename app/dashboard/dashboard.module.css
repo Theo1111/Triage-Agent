@@ -303,6 +303,9 @@
 /* Category badge */
 .badgeCategory { background: #f0fdf4; color: #166534; border-color: #bbf7d0; text-transform: none; font-size: 11px; }
 
+/* NEW INFO badge — shown when operator has viewed an item and it has since been updated */
+.badgeNewInfo { background: #faf5ff; color: #7c3aed; border-color: #ddd6fe; }
+
 /* Row selected highlight */
 .rowSelected { background: #eff6ff !important; }
 

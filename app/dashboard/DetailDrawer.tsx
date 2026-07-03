@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { SerializedTriageItem } from "./types";
 import styles from "./dashboard.module.css";
 import { formatCategoryLabel } from "@/src/lib/formatCategory";
@@ -24,6 +24,24 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
   const [ownerInput,  setOwnerInput]  = useState("");
   const [editSummary, setEditSummary] = useState(false);
   const [summaryInput, setSummaryInput] = useState("");
+
+  // Mark the item as read when the drawer opens (or switches to a different item).
+  // Fires silently — errors are suppressed since this is non-critical.
+  useEffect(() => {
+    if (!item) return;
+    const id = item.id;
+    const hadUnread = item.has_unread_update;
+    fetch("/api/dashboard/triage/mark-read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ triageItemId: id }),
+    })
+      .then(() => {
+        if (hadUnread) onItemUpdated({ ...item, has_unread_update: false });
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.id]);
 
   if (!item) return null;
 

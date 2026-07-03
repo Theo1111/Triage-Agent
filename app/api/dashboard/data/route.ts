@@ -1,12 +1,14 @@
-import { NextResponse } from "next/server";
-import { fetchAllItems } from "@/app/dashboard/fetchDashboardData";
+import { NextRequest, NextResponse } from "next/server";
+import { fetchAllItemsForOperator } from "@/app/dashboard/fetchDashboardData";
+import { getOperatorFromRequest } from "@/src/lib/dashboardOperatorSession";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   console.log("[dashboard/data] fetch started");
   try {
-    const items = await fetchAllItems();
+    const operator = await getOperatorFromRequest(req);
+    const items = await fetchAllItemsForOperator(operator?.id ?? null);
     console.log(`[dashboard/data] fetch completed items=${items.length}`);
     return NextResponse.json({
       ok: true,

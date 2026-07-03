@@ -30,6 +30,8 @@ export interface SerializedTriageItem {
   // From email_classifications JOIN
   primary_category: string | null;
   urgency_reason: string | null;
+  // Per-operator read state: true when updated_at > operator's last_viewed_at
+  has_unread_update: boolean;
 }
 
 export interface TabCounts {

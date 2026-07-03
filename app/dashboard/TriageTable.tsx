@@ -158,6 +158,11 @@ export default function TriageTable({ items, onItemUpdated, onRefresh }: Props) 
                       <span className={`${styles.badge} ${STATUS_CLASS[item.status] ?? styles.statusNew}`}>
                         {item.status.replace(/_/g, " ")}
                       </span>
+                      {item.has_unread_update && (
+                        <span className={`${styles.badge} ${styles.badgeNewInfo}`}>
+                          NEW INFO
+                        </span>
+                      )}
                     </div>
                   </td>
 
