@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createOperatorProfile } from "@/src/services/operatorProfiles";
 import { friendlyOperatorError } from "@/src/lib/operatorErrors";
+import { isAllowedDashboardSignupEmail, normalizeSignupEmail } from "@/src/lib/dashboardSignupPolicy";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,15 @@ export async function POST(req: NextRequest) {
     const { username, displayName, password, confirmPassword } = body;
 
     if (!username?.trim()) {
-      return NextResponse.json({ error: "username is required" }, { status: 400 });
+      return NextResponse.json({ error: "Grata email is required" }, { status: 400 });
+    }
+    // Signup is restricted to Grata employees — exact-domain email check.
+    if (!isAllowedDashboardSignupEmail(username)) {
+      console.warn(`[operators/create] signup blocked — non-Grata email: "${username.trim().slice(0, 100)}"`);
+      return NextResponse.json(
+        { error: "Only Grata email addresses can create dashboard profiles." },
+        { status: 403 }
+      );
     }
     if (!password) {
       return NextResponse.json({ error: "password is required" }, { status: 400 });
@@ -29,7 +38,7 @@ export async function POST(req: NextRequest) {
     }
 
     const profile = await createOperatorProfile({
-      username: username.trim(),
+      username: normalizeSignupEmail(username),
       displayName: displayName?.trim() || null,
       password,
     });
@@ -38,7 +47,9 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const msg = friendlyOperatorError(err);
     console.error("[operators/create]", err);
-    const status = (err instanceof Error && err.message.includes("already taken")) ? 409 : 400;
+    const isDuplicate = err instanceof Error &&
+      (err.message.includes("already registered") || err.message.includes("already taken"));
+    const status = isDuplicate ? 409 : 400;
     return NextResponse.json({ error: msg }, { status });
   }
 }

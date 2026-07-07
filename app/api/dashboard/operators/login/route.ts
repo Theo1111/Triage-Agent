@@ -21,9 +21,11 @@ export async function POST(req: NextRequest) {
     const profile = await verifyOperatorPassword(username.trim(), password);
     if (!profile) {
       // Intentionally vague — don't reveal whether the username exists.
+      console.warn(`[operators/login] login failed username="${username.trim().slice(0, 100)}"`);
       return NextResponse.json({ error: "Invalid username or password" }, { status: 401 });
     }
 
+    console.log(`[operators/login] login success operator=${profile.id} username=${profile.username}`);
     const res = NextResponse.json({ profile });
     setOperatorSessionCookie(res, profile.id);
     return res;

@@ -8,7 +8,11 @@ export async function GET(req: NextRequest) {
   console.log("[dashboard/data] fetch started");
   try {
     const operator = await getOperatorFromRequest(req);
-    const items = await fetchAllItemsForOperator(operator?.id ?? null);
+    if (!operator) {
+      console.warn("[dashboard/data] auth required — missing or invalid session");
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+    const items = await fetchAllItemsForOperator(operator.id);
     console.log(`[dashboard/data] fetch completed items=${items.length}`);
     return NextResponse.json({
       ok: true,

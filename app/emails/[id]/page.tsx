@@ -1,5 +1,6 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
+import { getOperatorFromServerCookies } from "@/src/lib/dashboardOperatorSession";
 import { queryOne } from "@/src/lib/db";
 import { formatCategoryLabel } from "@/src/lib/formatCategory";
 import { formatTorontoDateTime } from "@/src/lib/formatDate";
@@ -142,6 +143,14 @@ export default async function EmailDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+
+  // Auth gate: email bodies are private customer content. Redirect
+  // unauthenticated visitors to the dashboard login (fail closed).
+  const operator = await getOperatorFromServerCookies();
+  if (!operator) {
+    console.warn("[emails] auth required — redirecting to /dashboard/login");
+    redirect("/dashboard/login");
+  }
 
   // Load the target email first.
   const targetEmail = await inboundEmailsRepo.findById(id);

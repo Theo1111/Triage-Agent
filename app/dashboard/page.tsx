@@ -1,6 +1,6 @@
-import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { fetchAllItemsForOperator } from "./fetchDashboardData";
-import { decodeCookie } from "@/src/lib/dashboardOperatorSession";
+import { getOperatorFromServerCookies } from "@/src/lib/dashboardOperatorSession";
 import type { SerializedTriageItem } from "./types";
 import DashboardClient from "./DashboardClient";
 import DashboardHeaderActions from "./DashboardHeaderActions";
@@ -17,15 +17,16 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const initialTeam   = params.team   ?? "";
   const initialSearch = params.search ?? "";
 
-  // Read the operator from the HttpOnly session cookie for per-operator unread counts.
-  let operatorId: string | null = null;
-  try {
-    const cookieStore = await cookies();
-    const raw = cookieStore.get("dash_op_sess")?.value;
-    if (raw) operatorId = decodeCookie(raw);
-  } catch {
-    // Non-critical — dashboard still works without operator context.
+  // Auth gate: the dashboard contains private customer/support data.
+  // Verify the HttpOnly session cookie server-side (signature + operator exists
+  // in DB) and redirect unauthenticated visitors to the login page. Fail closed:
+  // any resolution failure counts as unauthenticated.
+  const operator = await getOperatorFromServerCookies();
+  if (!operator) {
+    console.warn("[dashboard] auth required — redirecting to /dashboard/login");
+    redirect("/dashboard/login");
   }
+  const operatorId = operator.id;
 
   let allItems: SerializedTriageItem[] = [];
   let dbError: string | null = null;

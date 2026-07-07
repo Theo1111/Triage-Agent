@@ -11,9 +11,9 @@ export function friendlyOperatorError(err: unknown): string {
     return "Operator profile storage is not set up yet. Run the operator_profiles migration against your Supabase database.";
   }
 
-  // Unique constraint violation — duplicate username.
-  if (raw.includes("already taken") || raw.includes("duplicate key") || raw.includes("23505")) {
-    return "That username is already taken. Choose a different one.";
+  // Unique constraint violation — duplicate username/email.
+  if (raw.includes("already registered") || raw.includes("already taken") || raw.includes("duplicate key") || raw.includes("23505")) {
+    return "That email is already registered — try logging in instead.";
   }
 
   // Connection refused / wrong DATABASE_URL.

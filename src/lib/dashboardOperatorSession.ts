@@ -82,3 +82,22 @@ export async function getOperatorFromRequest(
 
   return getOperatorProfileById(id);
 }
+
+// ── Resolve active operator inside a server component ────────────────────────
+// Uses next/headers cookies(). Returns null on any failure (missing cookie,
+// bad signature, unknown operator, DB error) so callers can fail closed.
+export async function getOperatorFromServerCookies(): Promise<OperatorProfilePublic | null> {
+  try {
+    const { cookies } = await import("next/headers");
+    const raw = (await cookies()).get(COOKIE_NAME)?.value;
+    if (!raw) return null;
+
+    const id = decodeCookie(raw);
+    if (!id) return null;
+
+    return await getOperatorProfileById(id);
+  } catch (err) {
+    console.warn("[dashboard-session] server cookie resolution failed:", err);
+    return null;
+  }
+}

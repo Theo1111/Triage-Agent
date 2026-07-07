@@ -6,6 +6,13 @@ import styles from "./login.module.css";
 
 type Tab = "login" | "create";
 
+// Mirrors src/lib/dashboardSignupPolicy.ts — server-side validation is authoritative.
+function isGrataEmail(email: string): boolean {
+  const normalized = email.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._%+-]*@[a-z0-9.-]+\.[a-z]{2,}$/.test(normalized)) return false;
+  return normalized.slice(normalized.lastIndexOf("@") + 1) === "grata.life";
+}
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -72,6 +79,10 @@ export default function LoginPage() {
     e.preventDefault();
     setCreateErr("");
     setCreateMsg("");
+    if (!isGrataEmail(newUsername)) {
+      setCreateErr("Only Grata email addresses can create dashboard profiles.");
+      return;
+    }
     if (newPass.length < 8) {
       setCreateErr("Password must be at least 8 characters.");
       return;
@@ -86,7 +97,7 @@ export default function LoginPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username:        newUsername.trim(),
+          username:        newUsername.trim().toLowerCase(),
           displayName:     newDisplay.trim() || null,
           password:        newPass,
           confirmPassword: newConfirm,
@@ -101,14 +112,14 @@ export default function LoginPage() {
       const loginRes = await fetch("/api/dashboard/operators/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: newUsername.trim(), password: newPass }),
+        body: JSON.stringify({ username: newUsername.trim().toLowerCase(), password: newPass }),
       });
       if (loginRes.ok) {
         router.push("/dashboard");
       } else {
         // Auto-login failed — drop to login tab with a success hint.
         setCreateMsg("Profile created! Log in with your new credentials.");
-        setUsername(newUsername.trim());
+        setUsername(newUsername.trim().toLowerCase());
         setPassword("");
         switchTab("login");
       }
@@ -162,7 +173,7 @@ export default function LoginPage() {
           <form className={styles.loginForm} onSubmit={handleLogin} noValidate>
             {createMsg && <div className={styles.loginSuccess}>{createMsg}</div>}
             <label className={styles.loginLabel}>
-              <span className={styles.loginLabelText}>Username</span>
+              <span className={styles.loginLabelText}>Email or username</span>
               <input
                 className={styles.loginInput}
                 type="text"
@@ -195,13 +206,14 @@ export default function LoginPage() {
         {tab === "create" && (
           <form className={styles.loginForm} onSubmit={handleCreate} noValidate>
             <label className={styles.loginLabel}>
-              <span className={styles.loginLabelText}>Username</span>
+              <span className={styles.loginLabelText}>Grata email</span>
               <input
                 className={styles.loginInput}
-                type="text"
+                type="email"
                 value={newUsername}
                 onChange={e => setNewUsername(e.target.value)}
-                autoComplete="username"
+                placeholder="you@grata.life"
+                autoComplete="email"
                 autoFocus
                 required
               />

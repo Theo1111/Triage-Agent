@@ -145,6 +145,11 @@ export default function DashboardClient({
     console.log("[dashboard] API fetch started");
     try {
       const res = await fetch("/api/dashboard/data");
+      if (res.status === 401) {
+        // Session expired — send the operator back to login.
+        window.location.href = "/dashboard/login";
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const payload = await res.json() as { ok: boolean; items?: SerializedTriageItem[]; error?: string };
       if (!payload.ok || !payload.items) throw new Error(payload.error ?? "No data");

@@ -8,8 +8,8 @@ export async function POST(req: NextRequest) {
   try {
     const operator = await getOperatorFromRequest(req);
     if (!operator) {
-      // Non-critical: silently succeed when no session is present.
-      return NextResponse.json({ success: true });
+      console.warn("[mark-read] auth required — missing or invalid session");
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
     }
 
     const { triageItemId } = (await req.json()) as { triageItemId?: string };

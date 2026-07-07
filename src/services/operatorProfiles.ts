@@ -1,5 +1,9 @@
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { query, queryOne } from "@/src/lib/db";
+import {
+  isAllowedDashboardSignupEmail,
+  normalizeSignupEmail,
+} from "@/src/lib/dashboardSignupPolicy";
 
 const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
 const KEY_LEN = 64;
@@ -109,12 +113,6 @@ async function checkPassword(password: string, hash: string, salt: string): Prom
 
 // ── Validation ─────────────────────────────────────────────────────────────────
 
-function validateUsername(username: string): void {
-  if (!/^[a-zA-Z0-9._-]{2,30}$/.test(username)) {
-    throw new Error("Username must be 2–30 characters: letters, digits, . _ -");
-  }
-}
-
 function validatePassword(password: string): void {
   if (password.length < 8) {
     throw new Error("Password must be at least 8 characters");
@@ -123,6 +121,9 @@ function validatePassword(password: string): void {
 
 // ── CRUD ───────────────────────────────────────────────────────────────────────
 
+// New signups must use a Grata email address as the username (stored lowercase).
+// Existing profiles with non-email usernames are unaffected — login lookup is
+// unchanged, so they keep working.
 export async function createOperatorProfile(input: {
   username: string;
   displayName?: string | null;
@@ -130,16 +131,23 @@ export async function createOperatorProfile(input: {
 }): Promise<OperatorProfilePublic> {
   await ensureTable();
 
-  validateUsername(input.username);
+  if (!isAllowedDashboardSignupEmail(input.username)) {
+    console.warn(
+      `[operatorProfiles] signup blocked — not an allowed Grata email: "${input.username.trim().slice(0, 100)}"`
+    );
+    throw new Error("Only Grata email addresses can create dashboard profiles.");
+  }
+  const email = normalizeSignupEmail(input.username);
   validatePassword(input.password);
 
-  // Case-insensitive duplicate check
+  // Case-insensitive duplicate check. Same message as any other create failure
+  // shape — does not confirm the account exists beyond what a signup retry shows.
   const existing = await queryOne<{ id: string }>(
     `SELECT id FROM operator_profiles WHERE lower(username) = lower($1)`,
-    [input.username]
+    [email]
   );
   if (existing) {
-    throw new Error(`Username "${input.username}" is already taken`);
+    throw new Error("That email is already registered — try logging in instead.");
   }
 
   const { hash, salt } = await hashPassword(input.password);
@@ -147,9 +155,10 @@ export async function createOperatorProfile(input: {
     `INSERT INTO operator_profiles (username, display_name, password_hash, password_salt)
      VALUES ($1, $2, $3, $4)
      RETURNING id, username, display_name, created_at`,
-    [input.username, input.displayName?.trim() || null, hash, salt]
+    [email, input.displayName?.trim() || null, hash, salt]
   );
   if (!row) throw new Error("Insert succeeded but returned no row");
+  console.log(`[operatorProfiles] signup success email=${email}`);
   return { id: row.id, username: row.username, displayName: row.display_name };
 }
 
