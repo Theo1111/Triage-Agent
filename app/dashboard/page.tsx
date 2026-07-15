@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { fetchAllItemsForOperator } from "./fetchDashboardData";
+import { fetchRecentAgentRuns } from "./fetchAgentRuns";
 import { getOperatorFromServerCookies } from "@/src/lib/dashboardOperatorSession";
-import type { SerializedTriageItem } from "./types";
+import type { SerializedAgentRun, SerializedTriageItem } from "./types";
 import DashboardClient from "./DashboardClient";
 import DashboardHeaderActions from "./DashboardHeaderActions";
 import styles from "./dashboard.module.css";
@@ -14,6 +15,7 @@ interface PageProps {
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   const params        = await searchParams;
+  const initialView   = params.view   ?? "queue";
   const initialTeam   = params.team   ?? "";
   const initialSearch = params.search ?? "";
 
@@ -29,10 +31,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const operatorId = operator.id;
 
   let allItems: SerializedTriageItem[] = [];
+  let agentRuns: SerializedAgentRun[] = [];
   let dbError: string | null = null;
 
   try {
-    allItems = await fetchAllItemsForOperator(operatorId);
+    [allItems, agentRuns] = await Promise.all([
+      fetchAllItemsForOperator(operatorId),
+      fetchRecentAgentRuns(200),
+    ]);
   } catch (err) {
     const raw = err instanceof Error ? err.message : "Unknown database error";
     dbError = raw.includes("operator_profiles") || raw.includes("42P01")
@@ -53,6 +59,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
       <DashboardClient
         initialItems={allItems}
+        initialAgentRuns={agentRuns}
+        initialView={initialView}
         initialTeam={initialTeam}
         initialSearch={initialSearch}
         hasDbError={!!dbError}

@@ -278,6 +278,8 @@
   cursor: pointer;
   white-space: nowrap;
   line-height: 1.4;
+  text-decoration: none;
+  display: inline-block;
 }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -311,6 +313,69 @@
 
 /* Category cell */
 .categoryCell { min-width: 140px; }
+
+/* ── Top-level view tabs (Queue / Agent) ───────────────────────────────────── */
+.viewTabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 14px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.viewTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 16px;
+  margin-bottom: -1px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+}
+.viewTab:hover {
+  color: #111827;
+  background: #f3f4f6;
+}
+.viewTabActive {
+  color: #1d4ed8;
+  background: #fff;
+  border-color: #e5e7eb;
+}
+.viewTabCount {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 10px;
+  font-size: 11px;
+  padding: 1px 7px;
+  font-weight: 700;
+  min-width: 18px;
+  text-align: center;
+}
+.viewTabActive .viewTabCount {
+  background: #dbeafe;
+}
+
+.agentChipList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.agentChip {
+  display: inline-block;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+}
+.agentErrorText {
+  color: #dc2626;
+}
 
 /* ── Filter bar ──────────────────────────────────────────────────────────────── */
 .filterBar {

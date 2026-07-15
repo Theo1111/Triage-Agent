@@ -46,3 +46,47 @@ export interface TabCounts {
   resolved: number;
   archived: number;
 }
+
+export type DashboardView = "queue" | "agent";
+
+/** One triage-agent classification run, joined to email + current classification. */
+export interface SerializedAgentRun {
+  id: string;
+  run_id: string;
+  inbound_email_id: string;
+  status: string;
+  model_name: string | null;
+  prompt_version: string | null;
+  started_at: string;
+  finished_at: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  error_message: string | null;
+  subject: string | null;
+  sender_email: string | null;
+  sender_name: string | null;
+  source_inbox_email: string | null;
+  snippet: string | null;
+  classification_id: string | null;
+  urgency_level: string | null;
+  sensitivity_level: string | null;
+  primary_category: string | null;
+  category_tags: string[];
+  summary: string | null;
+  urgency_reason: string | null;
+  sensitivity_reason: string | null;
+  recommended_owner: string | null;
+  recommended_next_step: string | null;
+  confidence_score: number | null;
+  route_type: string | null;
+  triage_item_id: string | null;
+  triage_status: string | null;
+  // Diagnostics from classification_runs.raw_response
+  operational_impact_detected: boolean | null;
+  needs_manual_review: boolean | null;
+  impact_reasoning: string | null;
+  matched_vocabulary_terms: string[];
+  human_language_signals: string[];
+  safe_slack_summary: string | null;
+}

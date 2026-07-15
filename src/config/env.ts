@@ -57,6 +57,9 @@ const envSchema = z.object({
   // Generate with: openssl rand -hex 32
   CRON_SECRET: z.string().optional(),
 
+  // Paperclip heartbeat endpoint protection secret.
+  PAPERCLIP_HEARTBEAT_SECRET: z.string().optional(),
+
   // Future domain-wide delegation — not used in V1
   GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL: z.string().optional(),
   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().optional(),
