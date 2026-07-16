@@ -18,25 +18,13 @@ function authenticated(req: NextRequest, secret: string): boolean {
 type CountRow = { count: string | number };
 type TeamCountRow = { team: string; count: string | number };
 
-// Mirrors TEAM_CATEGORIES in src/config/roles.ts — keep in sync.
+// Team keys mirror the dashboard tabs, which route by
+// email_classifications.recommended_owner (see app/dashboard/utils.ts).
 const TEAM_BUCKETS = [
-  {
-    key: "operations",
-    label: "Operations",
-    categories: [
-      "access_or_lockout",
-      "building_infrastructure",
-      "hardware_or_device",
-      "cameras_or_security_video",
-    ],
-  },
-  {
-    key: "engineering",
-    label: "Engineering",
-    categories: ["app_or_software", "engineering_blocker", "access_control", "ict_or_intercom"],
-  },
-  { key: "customer_success", label: "Customer Success", categories: ["customer_escalation"] },
-  { key: "field_ops", label: "Field Ops", categories: ["field_ops"] },
+  { key: "operations", label: "Operations" },
+  { key: "engineering", label: "Engineering" },
+  { key: "customer_success", label: "Customer Success" },
+  { key: "field_ops", label: "Field Ops" },
 ] as const;
 
 type DateRange = { from: string; to: string };
@@ -60,23 +48,14 @@ function parseDateRange(url: URL): DateRange | null {
 async function fetchTeamCounts(
   range: DateRange | null,
 ): Promise<Array<{ key: string; label: string; count: number; severity: string }>> {
-  const cases = TEAM_BUCKETS.map(
-    (team, index) =>
-      `WHEN ec.primary_category = ANY($${index + 1}::text[]) THEN '${team.key}'`,
-  ).join(" ");
-  const rangeClause = range
-    ? ` AND ti.created_at >= $${TEAM_BUCKETS.length + 1} AND ti.created_at < $${TEAM_BUCKETS.length + 2}`
-    : "";
-  const params: unknown[] = TEAM_BUCKETS.map((team) => [...team.categories]);
-  if (range) params.push(range.from, range.to);
+  const rangeClause = range ? " AND ti.created_at >= $1 AND ti.created_at < $2" : "";
+  const params: unknown[] = range ? [range.from, range.to] : [];
   const rows = await query<TeamCountRow>(
-    `SELECT team, count(*)::int AS count FROM (
-       SELECT CASE ${cases} ELSE 'other' END AS team
-       FROM triage_items ti
-       LEFT JOIN email_classifications ec ON ec.id = ti.classification_id
-       WHERE ti.status NOT IN ('resolved', 'archived', 'ignored')${rangeClause}
-     ) teamed
-     GROUP BY team`,
+    `SELECT COALESCE(ec.recommended_owner, 'other') AS team, count(*)::int AS count
+     FROM triage_items ti
+     LEFT JOIN email_classifications ec ON ec.id = ti.classification_id
+     WHERE ti.status NOT IN ('resolved', 'archived', 'ignored')${rangeClause}
+     GROUP BY 1`,
     params,
   ).catch(() => [] as TeamCountRow[]);
   const counts = new Map(rows.map((row) => [row.team, Number(row.count ?? 0)]));
@@ -98,55 +77,59 @@ export async function GET(req: NextRequest) {
   const range = parseDateRange(new URL(req.url));
   const rangeClause = range ? " AND created_at >= $1 AND created_at < $2" : "";
   const rangeParams = range ? [range.from, range.to] : [];
+  const runRangeClause = range ? " AND cr.started_at >= $1 AND cr.started_at < $2" : "";
 
   try {
-    const [open, urgentOpen, manualReview, escalated, failedRuns, lowConfidence, teams] = await Promise.all([
-      query<CountRow>(
-        `SELECT count(*)::int AS count FROM triage_items
-         WHERE status NOT IN ('resolved', 'archived', 'ignored')${rangeClause}`,
-        rangeParams,
-      ),
-      query<CountRow>(
-        `SELECT count(*)::int AS count FROM triage_items
-         WHERE status NOT IN ('resolved', 'archived', 'ignored')
-           AND urgency_level = 'urgent'${rangeClause}`,
-        rangeParams,
-      ),
-      query<CountRow>(
-        `SELECT count(*)::int AS count FROM triage_items WHERE status = 'manual_review'${rangeClause}`,
-        rangeParams,
-      ),
-      query<CountRow>(
-        `SELECT count(*)::int AS count FROM triage_items
-         WHERE (status = 'escalated' OR escalated_at IS NOT NULL)${rangeClause}`,
-        rangeParams,
-      ),
-      query<CountRow>(
-        `SELECT count(*)::int AS count FROM classification_runs
-         WHERE status = 'failed'
-           AND created_at > now() - interval '7 days'`,
-      ).catch(() => [{ count: 0 }]),
-      query<CountRow>(
-        `SELECT count(*)::int AS count FROM classification_runs
-         WHERE confidence_score IS NOT NULL
-           AND confidence_score < 0.7
-           AND created_at > now() - interval '7 days'`,
-      ).catch(() => [{ count: 0 }]),
-      fetchTeamCounts(range),
-    ]);
+    const [open, urgentOpen, emailsProcessed, emailsFlagged, falsePositives, teams] =
+      await Promise.all([
+        query<CountRow>(
+          `SELECT count(*)::int AS count FROM triage_items
+           WHERE status NOT IN ('resolved', 'archived', 'ignored')${rangeClause}`,
+          rangeParams,
+        ),
+        query<CountRow>(
+          `SELECT count(*)::int AS count FROM triage_items
+           WHERE status NOT IN ('resolved', 'archived', 'ignored')
+             AND urgency_level = 'urgent'${rangeClause}`,
+          rangeParams,
+        ),
+        query<CountRow>(
+          `SELECT count(DISTINCT cr.inbound_email_id)::int AS count FROM classification_runs cr
+           WHERE cr.status = 'success'${runRangeClause}`,
+          rangeParams,
+        ).catch(() => [{ count: 0 }]),
+        query<CountRow>(
+          `SELECT count(DISTINCT inbound_email_id)::int AS count FROM triage_items
+           WHERE true${rangeClause}`,
+          rangeParams,
+        ).catch(() => [{ count: 0 }]),
+        // A flagged email whose triage item was dismissed as 'ignored' is a
+        // false positive: the agent raised it, a human decided it wasn't real.
+        query<CountRow>(
+          `SELECT count(DISTINCT inbound_email_id)::int AS count FROM triage_items
+           WHERE status = 'ignored'${rangeClause}`,
+          rangeParams,
+        ).catch(() => [{ count: 0 }]),
+        fetchTeamCounts(range),
+      ]);
 
     const n = (rows: CountRow[]) => Number(rows[0]?.count ?? 0);
+    const flagged = n(emailsFlagged);
+    const falsePositiveRate = flagged > 0 ? Math.round((n(falsePositives) / flagged) * 1000) / 10 : 0;
 
     return NextResponse.json({
       ok: true,
       generatedAt: new Date().toISOString(),
       metrics: [
+        // Agent-quality metrics for Paperclip's Company signal rail. Open/urgent
+        // volumes stay available for the live-flow fallback but rank last so the
+        // rail (top 3 by severity) surfaces the agent stats instead of numbers
+        // already shown in the flow above.
+        { key: "emails_processed", label: "Emails processed", value: n(emailsProcessed), severity: "high" },
+        { key: "emails_flagged", label: "Emails flagged", value: flagged, severity: "high" },
+        { key: "false_positive_rate", label: "False positive rate (%)", value: falsePositiveRate, severity: "high" },
         { key: "open", label: "Open items", value: n(open), severity: "info" },
-        { key: "urgent_open", label: "Urgent open", value: n(urgentOpen), severity: "critical" },
-        { key: "manual_review", label: "Manual review", value: n(manualReview), severity: "high" },
-        { key: "escalated", label: "Escalated", value: n(escalated), severity: "high" },
-        { key: "failed_runs", label: "Failed runs (7d)", value: n(failedRuns), severity: "high" },
-        { key: "low_confidence", label: "Low confidence (7d)", value: n(lowConfidence), severity: "medium" },
+        { key: "urgent_open", label: "Urgent open", value: n(urgentOpen), severity: "info" },
       ],
       topItems: [],
       teams,
