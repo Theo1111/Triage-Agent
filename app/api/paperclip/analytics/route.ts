@@ -80,19 +80,8 @@ export async function GET(req: NextRequest) {
   const runRangeClause = range ? " AND cr.started_at >= $1 AND cr.started_at < $2" : "";
 
   try {
-    const [open, urgentOpen, emailsProcessed, emailsFlagged, falsePositives, teams] =
+    const [emailsProcessed, emailsFlagged, falsePositives, teams] =
       await Promise.all([
-        query<CountRow>(
-          `SELECT count(*)::int AS count FROM triage_items
-           WHERE status NOT IN ('resolved', 'archived', 'ignored')${rangeClause}`,
-          rangeParams,
-        ),
-        query<CountRow>(
-          `SELECT count(*)::int AS count FROM triage_items
-           WHERE status NOT IN ('resolved', 'archived', 'ignored')
-             AND urgency_level = 'urgent'${rangeClause}`,
-          rangeParams,
-        ),
         query<CountRow>(
           `SELECT count(DISTINCT cr.inbound_email_id)::int AS count FROM classification_runs cr
            WHERE cr.status = 'success'${runRangeClause}`,
@@ -121,15 +110,12 @@ export async function GET(req: NextRequest) {
       ok: true,
       generatedAt: new Date().toISOString(),
       metrics: [
-        // Agent-quality metrics for Paperclip's Company signal rail. Open/urgent
-        // volumes stay available for the live-flow fallback but rank last so the
-        // rail (top 3 by severity) surfaces the agent stats instead of numbers
-        // already shown in the flow above.
+        // Agent-quality metrics only: open/urgent volumes live in the `teams`
+        // breakdown and are already visualized in Paperclip's live flow, so
+        // repeating them in the Company signal rail would double count.
         { key: "emails_processed", label: "Emails processed", value: n(emailsProcessed), severity: "high" },
         { key: "emails_flagged", label: "Emails flagged", value: flagged, severity: "high" },
         { key: "false_positive_rate", label: "False positive rate (%)", value: falsePositiveRate, severity: "high" },
-        { key: "open", label: "Open items", value: n(open), severity: "info" },
-        { key: "urgent_open", label: "Urgent open", value: n(urgentOpen), severity: "info" },
       ],
       topItems: [],
       teams,
