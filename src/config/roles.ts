@@ -8,24 +8,6 @@ export function getUserRole(username: string): UserRole {
   return USER_ROLES[username.toLowerCase()] ?? "viewer";
 }
 
-// Maps team tab keys to primary_category values in email_classifications.
-export const TEAM_CATEGORIES: Record<string, string[]> = {
-  operations: [
-    "access_or_lockout",
-    "building_infrastructure",
-    "hardware_or_device",
-    "cameras_or_security_video",
-  ],
-  engineering: [
-    "app_or_software",
-    "engineering_blocker",
-    "access_control",
-    "ict_or_intercom",
-  ],
-  customer_success: ["customer_escalation"],
-  field_ops: ["field_ops"],
-};
-
 export type TeamTab =
   | "all"
   | "operations"
