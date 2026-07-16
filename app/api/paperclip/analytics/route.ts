@@ -16,6 +16,55 @@ function authenticated(req: NextRequest, secret: string): boolean {
 }
 
 type CountRow = { count: string | number };
+type TeamCountRow = { team: string; count: string | number };
+
+// Mirrors TEAM_CATEGORIES in src/config/roles.ts — keep in sync.
+const TEAM_BUCKETS = [
+  {
+    key: "operations",
+    label: "Operations",
+    categories: [
+      "access_or_lockout",
+      "building_infrastructure",
+      "hardware_or_device",
+      "cameras_or_security_video",
+    ],
+  },
+  {
+    key: "engineering",
+    label: "Engineering",
+    categories: ["app_or_software", "engineering_blocker", "access_control", "ict_or_intercom"],
+  },
+  { key: "customer_success", label: "Customer Success", categories: ["customer_escalation"] },
+  { key: "field_ops", label: "Field Ops", categories: ["field_ops"] },
+] as const;
+
+async function fetchTeamCounts(): Promise<
+  Array<{ key: string; label: string; count: number; severity: string }>
+> {
+  const cases = TEAM_BUCKETS.map(
+    (team, index) =>
+      `WHEN ec.primary_category = ANY($${index + 1}::text[]) THEN '${team.key}'`,
+  ).join(" ");
+  const rows = await query<TeamCountRow>(
+    `SELECT team, count(*)::int AS count FROM (
+       SELECT CASE ${cases} ELSE 'other' END AS team
+       FROM triage_items ti
+       LEFT JOIN email_classifications ec ON ec.id = ti.classification_id
+       WHERE ti.status NOT IN ('resolved', 'archived', 'ignored')
+     ) teamed
+     GROUP BY team`,
+    TEAM_BUCKETS.map((team) => [...team.categories]),
+  ).catch(() => [] as TeamCountRow[]);
+  const counts = new Map(rows.map((row) => [row.team, Number(row.count ?? 0)]));
+  return TEAM_BUCKETS.map((team) => ({
+    key: team.key,
+    label: team.label,
+    count: counts.get(team.key) ?? 0,
+    severity:
+      team.key === "customer_success" ? "high" : team.key === "engineering" ? "medium" : "info",
+  }));
+}
 
 export async function GET(req: NextRequest) {
   const secret = env.PAPERCLIP_HEARTBEAT_SECRET;
@@ -24,7 +73,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [open, urgentOpen, manualReview, escalated, failedRuns, lowConfidence] = await Promise.all([
+    const [open, urgentOpen, manualReview, escalated, failedRuns, lowConfidence, teams] = await Promise.all([
       query<CountRow>(
         `SELECT count(*)::int AS count FROM triage_items
          WHERE status NOT IN ('resolved', 'archived', 'ignored')`,
@@ -52,6 +101,7 @@ export async function GET(req: NextRequest) {
            AND confidence_score < 0.7
            AND created_at > now() - interval '7 days'`,
       ).catch(() => [{ count: 0 }]),
+      fetchTeamCounts(),
     ]);
 
     const n = (rows: CountRow[]) => Number(rows[0]?.count ?? 0);
@@ -68,6 +118,7 @@ export async function GET(req: NextRequest) {
         { key: "low_confidence", label: "Low confidence (7d)", value: n(lowConfidence), severity: "medium" },
       ],
       topItems: [],
+      teams,
     });
   } catch (error) {
     console.error("[paperclip/analytics] failed", error);
