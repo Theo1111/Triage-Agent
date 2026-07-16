@@ -331,47 +331,60 @@ Route to manual_review even if urgent.
 
 ## Step 10 — Owner buckets
 
-CRITICAL ROUTING RULE — customer troubleshooting vs system failure:
-• Customer/resident reports a personal issue and asks for help → customer_success
-• Internal team identifies or suspects a confirmed system/backend failure → engineering
+CRITICAL ROUTING RULE — decide in this order:
 
-Do NOT route to engineering just because the email mentions app, lock, fob, access,
-battery, Bluetooth, or connectivity. Ask: has anyone confirmed a system problem, or is
-a customer just asking for troubleshooting help?
+1. SCALE — how many people are affected?
+   • ONE person describing their own personal issue → likely customer_success
+   • MULTIPLE residents, "residents" (plural), a whole floor/building, or a building
+     manager/staff member reporting on behalf of residents → engineering
 
-- customer_success: A customer or resident is asking for help, troubleshooting, or a
-  status update and no system failure has been confirmed yet. Use this when:
-  • Customer/resident says they cannot connect app to lock / cannot open door
+2. SUBSYSTEM — what is failing?
+   • Fobs, digital keys, keypads, access-control credentials, or intercom SYSTEM
+     malfunctioning → engineering (these are Grata-side systems, not user devices),
+     unless it is clearly one individual's setup/how-to question
+   • Personal app/login/account issue on the user's own phone (login denied, app won't
+     connect, Bluetooth pairing, downloads, permissions) → customer_success
+   • Physically broken/damaged hardware that needs an on-site repair or replacement
+     (keypad dead, lock physically broken, panel damaged) → field_ops
+
+- customer_success: ONE customer or resident asking for help with their own personal
+  app, login, or account experience. Use this when:
+  • Resident cannot log in / login denied / needs help downloading or setting up the app
+  • Resident's own app won't connect to their lock (their phone, their unit)
   • Customer asks whether an update may have caused their issue
-  • Customer reports a self-reported, user-specific experience ("my app", "my lock", "we can't")
-  • Troubleshooting has not started and no root cause has been identified
+  • Issue is likely user setup, Bluetooth, phone permissions, battery, device pairing, or usage
   • Customer asks "is this normal?", "can you help?", "what should I do?"
-  • Issue may be user setup, Bluetooth, phone permissions, battery, device pairing, or usage
-  • Customer is frustrated, needs a response, or is threatening to escalate
-  • Customer is angry, escalating, or threatening to cancel
+  • Customer is frustrated, needs a response, or is threatening to escalate or cancel
   • Repeated support complaints from the same customer
+  Do NOT use customer_success when multiple residents are affected or when a building
+  manager is reporting a fob/keypad/access problem on behalf of residents — that is engineering.
 
-- operations: resident lockouts, building ops coordination, unclear operational blockers,
-  resident/visitor experience issues NOT caused by a confirmed system failure
+- operations: building ops coordination, unclear operational blockers,
+  resident/visitor experience issues NOT caused by a system or hardware failure
 
-- engineering: Use ONLY when a system-level failure has been confirmed or is clearly
-  suspected based on evidence in the email. Indicators:
+- engineering: fob, digital key, keypad, access-control, and intercom-system
+  malfunctions in general, plus confirmed system-level failures. Indicators:
+  • Fobs or digital keys not working (elevator, garage, amenity rooms, doors) — even for
+    one unit, if the credential/hardware is failing rather than the user's phone setup
+  • Multiple residents or a whole building affected
+  • A building manager or property staff member reports the issue on behalf of residents
   • Internal team has diagnosed a technical or backend issue
-  • Access permissions are not applying after correct setup (not just a customer complaint)
-  • Multiple residents or a whole building is affected (not one user's personal issue)
-  • System outage is confirmed or strongly suspected
-  • App/admin portal/API/webhook/database/integration appears broken at a system level
-  • ICT, intercom, access-control system, or backend integration is failing
-  • Fobs/cards are created correctly in the system but the access-control hardware is rejecting them
+  • Access permissions are not applying after correct setup
+  • System outage confirmed or strongly suspected
+  • App/admin portal/API/webhook/database/integration broken at a system level
+  • Fobs/cards created correctly in the system but access-control hardware rejects them
   • Explicit engineering request: "Speer eng", "engineering", "API issue", "backend", "portal down"
-  Do NOT use engineering for: a single customer asking "my app won't connect to my lock."
 
-- field_ops: ONLY physical on-site logistics and hands-on tasks — delivering or bringing
+- field_ops: physical on-site logistics and hands-on hardware work — delivering or bringing
   hardware to a site, missing keys, dropping off fobs/panels/locks, picking up equipment,
-  on-site technician physically installing or swapping hardware, site inventory requests.
-  field_ops is NOT for system failures.
+  on-site technician physically installing or swapping hardware, site inventory requests,
+  coordination of on-site technician visits (scheduling, confirming, arrival times),
+  AND physically broken/damaged hardware that needs an on-site repair or replacement —
+  e.g. a keypad that is dead/not working so tenants are locked out, a physically broken
+  lock, a damaged panel.
 
-  CRITICAL RULE: "The fob / reader / intercom / access system is NOT WORKING" → engineering.
+  "Keypad broken, tenants locked out"       → field_ops   (physical repair needed on-site)
+  "Fobs not unlocking the garage door"      → engineering (credentials/system, not physical damage)
   "Bring fobs to the site" / "Install panels on-site" → field_ops.
   Do NOT assign field_ops just because the email mentions a door, fob, lock, reader,
   intercom, or building. Physical device name ≠ physical task.
@@ -382,18 +395,48 @@ a customer just asking for troubleshooting help?
 - ignore: not_relevant with high confidence
 
 Owner bucket examples — customer_success vs engineering:
+
+  App issues (customer-reported → customer_success; confirmed system failure → engineering):
   "I can't connect my Grata app to my lock, using PINs, battery 58%, did an update cause this?"
                                                 → customer_success (customer asking for help, no system failure confirmed)
   "My husband and I have had zero success connecting to the lock for days"
                                                 → customer_success (user-specific, troubleshooting not done)
-  "Can someone help me troubleshoot? My key fob doesn't work for my unit"
-                                                → customer_success (troubleshooting request, no system diagnosis)
-  "I am having trouble opening my door, what should I do?"
-                                                → customer_success (customer asking for help)
+  "Grata App Issue – unit 1208, resident can't connect"
+                                                → customer_success (single resident, user-reported, no system diagnosis)
+  "Issue with App – can you help me?"          → customer_success (customer asking for help)
+  "Log In Not Working"                         → customer_success (user login issue, no system failure implied)
+  "Initial log in denied"                      → customer_success (first-time setup/login, troubleshooting needed)
+  "Re: Grata app not connecting to apt lock"   → customer_success (resident troubleshooting, no system failure confirmed)
+  "My app button isn't doing anything"         → customer_success (user-specific app issue)
+  "I am having trouble opening my door with the app, what should I do?"
+                                                → customer_success (customer asking for app help)
+
+  ICT/intercom issues (resident-reported → customer_success; system failure → engineering):
+  "Re: Phones Not Ringing – my unit doesn't ring when visitors buzz in"
+                                                → customer_success (individual resident, no system-wide failure)
+  "My phone isn't ringing when someone buzzes at the intercom"
+                                                → customer_success (user-specific experience, not a system outage)
+  "Visitor can't buzz into my unit"            → customer_success (single-unit issue, troubleshooting request)
+  "Intercom isn't working for me"              → customer_success (resident troubleshooting request)
+  "The intercom system is completely down, no units are receiving calls"
+                                                → engineering  (building-wide confirmed failure)
+
+  Fobs / digital keys / keypads / access control (→ engineering by default; physical damage → field_ops):
+  "My fob isn't working for the bike room"     → engineering  (fob credential failing — Grata-side system)
+  "Residents in unit 909 having trouble with fob activation in the elevator"
+                                                → engineering  (multiple residents, fob system)
+  "Fobs are not unlocking the commercial bay garbage room"
+                                                → engineering  (manager reporting fob/access failure)
+  "Residents unable to use the app to unlock their door"
+                                                → engineering  (residents plural — access failure, not one user's phone)
   "GX saved the fobs but they still don't work for any resident"
                                                 → engineering  (system configured correctly, hardware failing)
   "Access permissions are not applying after setup"
                                                 → engineering  (configuration/system issue confirmed)
+  "Unit 407 keypad not working, tenants locked out"
+                                                → field_ops   (physically dead keypad needs on-site repair)
+
+  Confirmed system failures → engineering:
   "The admin portal is down"                   → engineering  (system failure confirmed)
   "Residents across the building cannot unlock" → engineering  (building-wide, likely system issue)
   "Looks like an IP change or integration issue"→ engineering  (internal technical diagnosis)
@@ -401,9 +444,22 @@ Owner bucket examples — customer_success vs engineering:
   "ICT fobs not working for bike room"          → engineering  (system failure, not delivery)
   "Front door reader is down"                   → engineering  (system failure confirmed)
   "Speer eng needs to look at this"             → engineering  (engineering team mention)
+
+  Other:
   "Customer is threatening to cancel"           → customer_success (escalation)
   "Can you bring 20 locks to the site tomorrow" → field_ops    (physical delivery task)
   "We need someone to install hardware on-site" → field_ops    (physical install task)
+  "What time is the technician arriving today?" → field_ops    (on-site visit coordination)
+  "Is the technician still coming to fix the intercom?"
+                                                → field_ops    (technician visit scheduling, not a new system failure)
+
+  REMINDER — the two-question test:
+  1. One person or many? A single person describing their own app/login/phone issue →
+     customer_success. "Residents" (plural), a whole floor/building, or a manager reporting
+     on behalf of residents → engineering.
+  2. Whose system is failing? The user's own phone/app/login setup → customer_success.
+     Grata-side fobs, digital keys, keypads, access-control, or the intercom system →
+     engineering. Physically broken hardware needing an on-site fix → field_ops.
 
 ## Step 11 — Routing rules
 - urgent + public_internal → route_type=slack_channel, shared_slack_allowed=true

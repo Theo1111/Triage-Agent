@@ -5,6 +5,7 @@ import type { SerializedTriageItem } from "./types";
 type ExtendedRow = TriageItem & {
   primary_category: string | null;
   urgency_reason: string | null;
+  recommended_owner: string | null;
 };
 
 type ExtendedRowWithRead = ExtendedRow & {
@@ -46,6 +47,7 @@ function serialize(row: ExtendedRow): SerializedTriageItem {
     restored_by: row.restored_by,
     primary_category: row.primary_category,
     urgency_reason: row.urgency_reason,
+    recommended_owner: row.recommended_owner,
     has_unread_update: false,
   };
 }
@@ -77,6 +79,7 @@ export async function fetchAllItemsForOperator(
       `SELECT ti.*,
               ec.primary_category,
               ec.urgency_reason,
+              ec.recommended_owner,
               CASE
                 WHEN tior.last_viewed_at IS NOT NULL AND ti.updated_at > tior.last_viewed_at THEN true
                 ELSE false
@@ -97,7 +100,8 @@ export async function fetchAllItemsForOperator(
   const rows = await query<ExtendedRow>(
     `SELECT ti.*,
             ec.primary_category,
-            ec.urgency_reason
+            ec.urgency_reason,
+            ec.recommended_owner
      FROM triage_items ti
      LEFT JOIN email_classifications ec ON ec.id = ti.classification_id
      ${BASE_ORDER}

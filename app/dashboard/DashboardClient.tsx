@@ -6,7 +6,6 @@ import FilterBar from "./FilterBar";
 import TriageTable from "./TriageTable";
 import ViewTabs from "./ViewTabs";
 import AgentRunsTable from "./AgentRunsTable";
-import { TEAM_CATEGORIES } from "@/src/config/roles";
 import { computeCounts } from "./utils";
 import type { DashboardView, SerializedAgentRun, SerializedTriageItem } from "./types";
 import styles from "./dashboard.module.css";
@@ -33,12 +32,10 @@ function filterItems(
     );
   } else if (team === "assigned") {
     items = items.filter(i => i.status === "assigned" || i.status === "escalated");
-  } else if (TEAM_CATEGORIES[team]) {
-    const cats = TEAM_CATEGORIES[team];
+  } else if (["operations", "engineering", "customer_success", "field_ops"].includes(team)) {
     items = items.filter(
       i =>
-        i.primary_category != null &&
-        cats.includes(i.primary_category) &&
+        i.recommended_owner === team &&
         !(CLOSED as readonly string[]).includes(i.status)
     );
   } else {
