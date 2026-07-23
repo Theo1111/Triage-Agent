@@ -18,6 +18,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const initialView   = params.view   ?? "queue";
   const initialTeam   = params.team   ?? "";
   const initialSearch = params.search ?? "";
+  const initialOwner  = params.owner  ?? "";
 
   // Auth gate: the dashboard contains private customer/support data.
   // Verify the HttpOnly session cookie server-side (signature + operator exists
@@ -63,6 +64,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         initialView={initialView}
         initialTeam={initialTeam}
         initialSearch={initialSearch}
+        initialOwner={initialOwner}
+        currentOperator={{
+          id: operator.id,
+          username: operator.username,
+          displayName: operator.displayName,
+        }}
         hasDbError={!!dbError}
         dbErrorMessage={dbError}
       />

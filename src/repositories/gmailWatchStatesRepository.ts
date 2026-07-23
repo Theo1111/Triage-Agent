@@ -15,6 +15,12 @@ export async function findByEmail(emailAddress: string): Promise<GmailWatchState
   );
 }
 
+export async function findAll(): Promise<GmailWatchState[]> {
+  return query<GmailWatchState>(
+    "SELECT * FROM gmail_watch_states ORDER BY email_address"
+  );
+}
+
 export async function upsertWatch(input: {
   monitoredInboxId: string;
   emailAddress: string;

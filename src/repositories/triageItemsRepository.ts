@@ -18,6 +18,9 @@ export interface InsertTriageItemInput {
   recommendedNextStep?: string | null;
   slackMessageTs?: string | null;
   slackChannel?: string | null;
+  // Denormalized Gmail thread id (migration 008) — lets the queue collapse a
+  // thread to one case and lets the drawer gather every message in the thread.
+  gmailThreadId?: string | null;
 }
 
 export async function insert(input: InsertTriageItemInput): Promise<TriageItem> {
@@ -27,8 +30,8 @@ export async function insert(input: InsertTriageItemInput): Promise<TriageItem> 
        source_inbox_email, sender_email, sender_name,
        subject, summary, urgency_level, sensitivity_level,
        route_type, owner, status, recommended_next_step,
-       slack_message_ts, slack_channel
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+       slack_message_ts, slack_channel, gmail_thread_id
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      RETURNING *`,
     [
       input.inboundEmailId,
@@ -47,6 +50,7 @@ export async function insert(input: InsertTriageItemInput): Promise<TriageItem> 
       input.recommendedNextStep ?? null,
       input.slackMessageTs ?? null,
       input.slackChannel ?? null,
+      input.gmailThreadId ?? null,
     ]
   );
   if (!row) throw new Error(`Failed to insert triage item for email ${input.inboundEmailId}`);
@@ -83,6 +87,17 @@ export async function findOpenByThreadId(
      LIMIT 1`,
     [gmailThreadId, excludeEmailId]
   );
+}
+
+// Count active (non-superseded) triage items in a given status — used by the
+// health panel (e.g. manual-review backlog).
+export async function countByStatus(status: TriageStatus): Promise<number> {
+  const row = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM triage_items
+     WHERE status = $1 AND superseded_by_triage_item_id IS NULL`,
+    [status]
+  );
+  return Number(row?.count ?? 0);
 }
 
 export async function findOpen(limit = 50): Promise<TriageItem[]> {

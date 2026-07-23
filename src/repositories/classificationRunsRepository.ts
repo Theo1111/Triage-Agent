@@ -72,3 +72,17 @@ export async function findByEmailId(inboundEmailId: string): Promise<Classificat
     [inboundEmailId]
   );
 }
+
+// Count runs of a given status since a cutoff — used by the health panel to
+// surface recent classification failures.
+export async function countByStatusSince(
+  status: ClassificationRunStatus,
+  since: Date
+): Promise<number> {
+  const row = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM classification_runs
+     WHERE status = $1 AND started_at >= $2`,
+    [status, since]
+  );
+  return Number(row?.count ?? 0);
+}

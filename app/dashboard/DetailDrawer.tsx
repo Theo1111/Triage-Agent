@@ -1,14 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import type { SerializedTriageItem } from "./types";
+import { useState, useEffect, useCallback } from "react";
+import type { SerializedTriageItem, CurrentOperator } from "./types";
 import styles from "./dashboard.module.css";
 import { formatCategoryLabel } from "@/src/lib/formatCategory";
 import { formatTorontoDateTime } from "@/src/lib/formatDate";
 import { deriveTriageDisplayState } from "@/src/lib/triageDisplayState";
+import { resolveOwner, type OperatorLite } from "@/src/lib/ownerDisplay";
+import { TEAM_LABELS } from "@/src/config/roles";
+import AssignMenu from "./AssignMenu";
+import CaseTimelineView from "./CaseTimelineView";
 
 interface Props {
   item: SerializedTriageItem | null;
+  operators: OperatorLite[];
+  currentOperator: CurrentOperator | null;
   onClose: () => void;
   onItemUpdated: (updated: SerializedTriageItem) => void;
 }
@@ -17,16 +23,13 @@ function fmtDate(iso: string | null): string {
   return formatTorontoDateTime(iso);
 }
 
-export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
-  const [loading,     setLoading]     = useState<string | null>(null);
-  const [error,       setError]       = useState<string | null>(null);
-  const [editOwner,   setEditOwner]   = useState(false);
-  const [ownerInput,  setOwnerInput]  = useState("");
-  const [editSummary, setEditSummary] = useState(false);
+export default function DetailDrawer({ item, operators, onClose, onItemUpdated }: Props) {
+  const [loading,      setLoading]      = useState<string | null>(null);
+  const [error,        setError]        = useState<string | null>(null);
+  const [editSummary,  setEditSummary]  = useState(false);
   const [summaryInput, setSummaryInput] = useState("");
 
-  // Mark the item as read when the drawer opens (or switches to a different item).
-  // Fires silently — errors are suppressed since this is non-critical.
+  // Mark read on open.
   useEffect(() => {
     if (!item) return;
     const id = item.id;
@@ -40,63 +43,47 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
         if (hadUnread) onItemUpdated({ ...item, has_unread_update: false });
       })
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item?.id]);
 
-  if (!item) return null;
-
-  // Actor is derived server-side from the HttpOnly session cookie.
-  // The client never sends an actor value.
-  async function callDashboard(
-    endpoint: string,
-    body: Record<string, unknown> = {}
-  ): Promise<SerializedTriageItem | null> {
-    setError(null);
-    setLoading(endpoint);
-    try {
-      const res = await fetch(`/api/dashboard/triage/${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ triageItemId: item!.id, ...body }),
-      });
-      const json = (await res.json()) as {
-        success?: boolean;
-        triageItem?: SerializedTriageItem;
-        error?: string;
-      };
-      if (res.status === 401) {
-        setError("Session expired — please log in again.");
+  const callDashboard = useCallback(
+    async (endpoint: string, body: Record<string, unknown> = {}): Promise<SerializedTriageItem | null> => {
+      if (!item) return null;
+      setError(null);
+      setLoading(endpoint);
+      try {
+        const res = await fetch(`/api/dashboard/triage/${endpoint}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ triageItemId: item.id, ...body }),
+        });
+        const json = (await res.json()) as {
+          success?: boolean;
+          triageItem?: SerializedTriageItem;
+          error?: string;
+        };
+        if (res.status === 401) {
+          setError("Session expired — please log in again.");
+          return null;
+        }
+        if (!res.ok || !json.success) {
+          setError(json.error ?? `HTTP ${res.status}`);
+          return null;
+        }
+        return json.triageItem ?? null;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Network error");
         return null;
+      } finally {
+        setLoading(null);
       }
-      if (!res.ok || !json.success) {
-        setError(json.error ?? `HTTP ${res.status}`);
-        return null;
-      }
-      return json.triageItem ?? null;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Network error");
-      return null;
-    } finally {
-      setLoading(null);
-    }
-  }
+    },
+    [item]
+  );
 
   async function handleAction(endpoint: string, body: Record<string, unknown> = {}) {
     const updated = await callDashboard(endpoint, body);
     if (updated) onItemUpdated(updated);
-  }
-
-  async function handleAssign() {
-    const owner = window.prompt("Assign to (name or username):");
-    if (owner?.trim()) await handleAction("assign", { owner: owner.trim() });
-  }
-
-  async function handleSaveOwner() {
-    if (ownerInput.trim()) {
-      await handleAction("assign", { owner: ownerInput.trim() });
-      setEditOwner(false);
-      setOwnerInput("");
-    }
   }
 
   async function handleSaveSummary() {
@@ -105,18 +92,18 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
     setSummaryInput("");
   }
 
+  if (!item) return null;
+
   const busy = loading !== null;
   const { isAssigned, isEscalated, isActive, isResolved, isArchived } = deriveTriageDisplayState(item);
+  const owner = resolveOwner(item.owner, operators);
 
   return (
     <>
       <div className={styles.drawerOverlay} onClick={onClose} />
       <div className={styles.drawerPanel}>
-        {/* Header */}
         <div className={styles.drawerHeader}>
-          <div className={styles.drawerTitle}>
-            {item.subject ?? <em>No subject</em>}
-          </div>
+          <div className={styles.drawerTitle}>{item.subject ?? <em>No subject</em>}</div>
           <button className={styles.drawerClose} onClick={onClose} aria-label="Close">✕</button>
         </div>
 
@@ -126,19 +113,16 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
         <div className={styles.drawerActions}>
           {isActive && (
             <>
-              {isAssigned ? (
-                <button className={styles.drawerBtn} onClick={() => handleAction("unassign")} disabled={busy}>
-                  {loading === "unassign" ? "…" : "↩️ Unassign"}
-                </button>
-              ) : (
-                <button
-                  className={`${styles.drawerBtn} ${styles.drawerBtnPrimary}`}
-                  onClick={handleAssign}
-                  disabled={busy}
-                >
-                  {loading === "assign" ? "…" : "✅ Assign"}
-                </button>
-              )}
+              <AssignMenu
+                operators={operators}
+                isAssigned={isAssigned}
+                busy={busy}
+                label={isAssigned ? "Reassign" : "Assign"}
+                onAssignSelf={() => handleAction("assign", { ownerKind: "self" })}
+                onAssignOperator={u => handleAction("assign", { ownerKind: "operator", owner: u })}
+                onAssignTeam={t => handleAction("assign", { ownerKind: "team", owner: t })}
+                onUnassign={() => handleAction("unassign")}
+              />
               {isEscalated ? (
                 <button className={styles.drawerBtn} onClick={() => handleAction("unescalate")} disabled={busy}>
                   {loading === "unescalate" ? "…" : "↘️ Unescalate"}
@@ -148,7 +132,13 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
                   {loading === "escalate" ? "…" : "🔺 Escalate"}
                 </button>
               )}
-              <button className={styles.drawerBtn} onClick={() => handleAction("resolve")} disabled={busy}>
+              <button
+                className={styles.drawerBtn}
+                onClick={() => {
+                  if (window.confirm("Resolve this case? It will leave the active queue.")) handleAction("resolve");
+                }}
+                disabled={busy}
+              >
                 {loading === "resolve" ? "…" : "🟢 Resolve"}
               </button>
             </>
@@ -163,7 +153,13 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
               {loading === "unarchive" ? "…" : "↩️ Restore"}
             </button>
           ) : (
-            <button className={`${styles.drawerBtn} ${styles.drawerBtnDanger}`} onClick={() => handleAction("archive")} disabled={busy}>
+            <button
+              className={`${styles.drawerBtn} ${styles.drawerBtnDanger}`}
+              onClick={() => {
+                if (window.confirm("Archive this case? It will leave the active queue.")) handleAction("archive");
+              }}
+              disabled={busy}
+            >
               {loading === "archive" ? "…" : "🗄️ Archive"}
             </button>
           )}
@@ -191,7 +187,6 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
           {item.urgency_reason && <DrawerField label="Reason">{item.urgency_reason}</DrawerField>}
           <DrawerField label="Sensitivity">{item.sensitivity_level.replace(/_/g, " ")}</DrawerField>
 
-          {/* Editable summary */}
           <div className={styles.drawerField}>
             <span className={styles.drawerLabel}>Summary</span>
             {editSummary ? (
@@ -219,46 +214,25 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
             )}
           </div>
 
-          {item.recommended_next_step && (
-            <DrawerField label="Next step">{item.recommended_next_step}</DrawerField>
-          )}
+          {item.recommended_next_step && <DrawerField label="Next step">{item.recommended_next_step}</DrawerField>}
         </div>
 
         {/* Triage status */}
         <div className={styles.drawerSection}>
           <div className={styles.drawerSectionTitle}>Triage</div>
           <DrawerField label="Status">{item.status.replace(/_/g, " ")}</DrawerField>
-
-          {/* Editable owner */}
-          <div className={styles.drawerField}>
-            <span className={styles.drawerLabel}>Owner</span>
-            {editOwner ? (
-              <div className={styles.drawerEditGroup}>
-                <input
-                  type="text"
-                  className={styles.drawerInput}
-                  value={ownerInput}
-                  onChange={e => setOwnerInput(e.target.value)}
-                  placeholder="Name or username"
-                  autoFocus
-                  onKeyDown={e => { if (e.key === "Enter") handleSaveOwner(); }}
-                />
-                <div className={styles.drawerEditActions}>
-                  <button className={styles.drawerBtnSm} onClick={handleSaveOwner} disabled={busy}>Save</button>
-                  <button className={styles.drawerBtnSmCancel} onClick={() => { setEditOwner(false); setOwnerInput(""); }}>Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <span
-                className={`${styles.drawerValue} ${styles.drawerEditable}`}
-                onClick={() => { setEditOwner(true); setOwnerInput(item.owner ?? ""); }}
-                title="Click to reassign"
-              >
-                {item.owner ?? <em className={styles.drawerMuted}>Unassigned — click to assign</em>}
+          <DrawerField label="Owner">
+            {owner.kind === "unassigned" ? (
+              <span className={styles.drawerMuted}>
+                Unassigned
+                {item.recommended_owner && (
+                  <> — suggested: {TEAM_LABELS[item.recommended_owner] ?? formatCategoryLabel(item.recommended_owner)}</>
+                )}
               </span>
+            ) : (
+              owner.label
             )}
-          </div>
-
+          </DrawerField>
           <DrawerField label="Route">{item.route_type.replace(/_/g, " ")}</DrawerField>
           {item.assigned_at && <DrawerField label="Assigned">{fmtDate(item.assigned_at)}</DrawerField>}
           {item.resolved_at && <DrawerField label="Resolved">{fmtDate(item.resolved_at)}</DrawerField>}
@@ -269,9 +243,7 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
             </DrawerField>
           )}
           {item.restored_at && (
-            <DrawerField label="Restored">
-              {fmtDate(item.restored_at)} by {item.restored_by ?? "—"}
-            </DrawerField>
+            <DrawerField label="Restored">{fmtDate(item.restored_at)} by {item.restored_by ?? "—"}</DrawerField>
           )}
           {item.slack_channel && (
             <DrawerField label="Slack">
@@ -282,6 +254,9 @@ export default function DetailDrawer({ item, onClose, onItemUpdated }: Props) {
             </DrawerField>
           )}
         </div>
+
+        {/* Activity timeline + thread messages */}
+        <CaseTimelineView triageItemId={item.id} />
       </div>
     </>
   );

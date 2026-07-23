@@ -80,11 +80,10 @@
 /* ── Stats cards ─────────────────────────────────────────────────────────── */
 .statsGrid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
   margin-bottom: 14px;
 }
-@media (max-width: 1100px) { .statsGrid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 700px)  { .statsGrid { grid-template-columns: repeat(2, 1fr); } }
 
 .statCard {
@@ -305,7 +304,7 @@
 /* Category badge */
 .badgeCategory { background: #f0fdf4; color: #166534; border-color: #bbf7d0; text-transform: none; font-size: 11px; }
 
-/* NEW INFO badge — shown when operator has viewed an item and it has since been updated */
+/* "Updated" badge — shown when an operator has viewed an item and it has since been updated */
 .badgeNewInfo { background: #faf5ff; color: #7c3aed; border-color: #ddd6fe; }
 
 /* Row selected highlight */
@@ -785,3 +784,277 @@
   font-weight: 600;
   color: #111827;
 }
+
+/* ── Selection column ────────────────────────────────────────────────────── */
+.checkCol { width: 28px; text-align: center; }
+.checkCol input { cursor: pointer; }
+.rowChecked { background: #eef2ff !important; }
+
+/* ── Owner column ────────────────────────────────────────────────────────── */
+.ownerCell { min-width: 130px; }
+.ownerUnassignedWrap { display: flex; flex-direction: column; gap: 1px; }
+.ownerUnassigned { font-size: 12px; color: #9ca3af; font-style: italic; }
+.ownerSuggest { font-size: 11px; color: #6b7280; }
+.ownerTagTeam { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
+
+/* SLA badge */
+.badgeSla { background: #fef2f2; color: #b91c1c; border-color: #fca5a5; }
+
+/* ── Assign menu ─────────────────────────────────────────────────────────── */
+.assignRoot { position: relative; display: inline-block; }
+.assignTriggerWide { min-width: 84px; }
+.assignMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  width: 240px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.assignMenuLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9ca3af;
+  padding: 6px 6px 2px;
+}
+.assignMenuItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  width: 100%;
+  font-size: 12px;
+  color: #374151;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.assignMenuItem:hover { background: #f3f4f6; }
+.assignMenuItemPrimary {
+  text-align: left;
+  width: 100%;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 5px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.assignMenuItemPrimary:hover { background: #dbeafe; }
+.assignMenuSub { font-size: 11px; color: #9ca3af; font-weight: 400; }
+.assignSearch {
+  width: 100%;
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  outline: none;
+  margin-bottom: 2px;
+}
+.assignSearch:focus { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
+.assignMenuScroll { max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.assignMenuEmpty { font-size: 12px; color: #9ca3af; padding: 6px 8px; }
+.assignTeamRow { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 4px 4px; }
+.assignTeamChip {
+  font-size: 11px;
+  color: #166534;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+.assignTeamChip:hover { background: #dcfce7; }
+
+/* ── More menu ───────────────────────────────────────────────────────────── */
+.moreRoot { position: relative; display: inline-block; }
+.btnMore { background: #f9fafb; color: #374151; border-color: #e5e7eb; }
+.btnMore:hover:not(:disabled) { background: #f3f4f6; }
+.moreMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 50;
+  min-width: 190px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.moreMenuLeft { right: auto; left: 0; }
+.moreMenuItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  color: #374151;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  padding: 7px 9px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.moreMenuItem:hover { background: #f3f4f6; }
+.moreMenuItemDanger { color: #b91c1c; }
+.moreMenuItemDanger:hover { background: #fef2f2; }
+
+/* ── Bulk bar ────────────────────────────────────────────────────────────── */
+.bulkBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+}
+.bulkCount { font-size: 13px; font-weight: 600; color: #1d4ed8; white-space: nowrap; }
+.bulkActions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.bulkClear {
+  margin-left: auto;
+  font-size: 12px;
+  color: #6b7280;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.bulkClear:hover { color: #111827; }
+.bulkResult {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  font-size: 12px;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.bulkResultOk { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+.bulkResultPartial { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+.bulkResultErr { background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
+.bulkResultDismiss {
+  background: none; border: none; cursor: pointer; opacity: 0.7;
+  font-size: 13px; color: inherit; padding: 0 2px;
+}
+.bulkResultDismiss:hover { opacity: 1; }
+
+/* ── Owner filter select ─────────────────────────────────────────────────── */
+.ownerFilterSelect {
+  font-size: 13px;
+  padding: 7px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 7px;
+  color: #111827;
+  background: #fff;
+  outline: none;
+  max-width: 200px;
+}
+.ownerFilterSelect:focus { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
+
+/* ── Health section ──────────────────────────────────────────────────────── */
+.healthWrap { margin-bottom: 12px; }
+.healthToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.healthToggle:hover { background: #f9fafb; }
+.healthToggleChevron { color: #9ca3af; font-size: 10px; }
+.healthDot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.healthDotOk { background: #16a34a; }
+.healthDotWarn { background: #d97706; }
+.healthDotCrit { background: #dc2626; }
+.healthPanel {
+  margin-top: 8px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+}
+.healthGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+.healthCard {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+}
+.healthOk { border-color: #bbf7d0; background: #f0fdf4; }
+.healthWarn { border-color: #fde68a; background: #fffbeb; }
+.healthCrit { border-color: #fca5a5; background: #fef2f2; }
+.healthCardHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.healthCardLabel { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; }
+.healthBadgeOk { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #16a34a; background: #dcfce7; border-radius: 4px; padding: 1px 6px; }
+.healthBadgeWarn { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #b45309; background: #fef3c7; border-radius: 4px; padding: 1px 6px; }
+.healthBadgeCrit { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #dc2626; background: #fee2e2; border-radius: 4px; padding: 1px 6px; }
+.healthCardValue { font-size: 16px; font-weight: 700; color: #111827; margin: 4px 0 2px; }
+.healthCardDetail { font-size: 12px; color: #4b5563; line-height: 1.4; }
+.healthCardAction { font-size: 12px; color: #1d4ed8; margin-top: 4px; }
+.healthFooter { font-size: 11px; color: #9ca3af; margin-top: 10px; }
+.healthRefreshBtn { font-size: 11px; color: #1d4ed8; background: none; border: none; cursor: pointer; text-decoration: underline; }
+.healthRefreshBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Case timeline + thread messages (drawer) ────────────────────────────── */
+.drawerCountPill {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  background: #f3f4f6;
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+.timelineMuted { font-size: 12px; color: #9ca3af; }
+.timelineError { font-size: 12px; color: #b91c1c; }
+.timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.timelineItem { display: flex; gap: 10px; align-items: flex-start; }
+.timelineIcon {
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.3;
+}
+.timelineBody { flex: 1; min-width: 0; }
+.timelineTitle { font-size: 13px; font-weight: 500; color: #111827; }
+.timelineDetail { font-size: 12px; color: #4b5563; margin-top: 1px; word-break: break-word; }
+.timelineMeta { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+
+.threadMsgList { display: flex; flex-direction: column; gap: 8px; }
+.threadMsg { border: 1px solid #f0f0f0; border-radius: 6px; padding: 8px 10px; background: #fafafa; }
+.threadMsgHead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.threadMsgFrom { font-size: 12px; font-weight: 600; color: #111827; }
+.threadMsgTime { font-size: 11px; color: #9ca3af; white-space: nowrap; }
+.threadMsgSnippet { font-size: 12px; color: #4b5563; margin-top: 3px; line-height: 1.4; }
+.threadMsgLink { font-size: 11px; color: #2563eb; text-decoration: none; margin-top: 4px; display: inline-block; }
+.threadMsgLink:hover { text-decoration: underline; }

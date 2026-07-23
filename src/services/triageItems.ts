@@ -1,6 +1,7 @@
 import * as triageRepo from "@/src/repositories/triageItemsRepository";
 import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
 import { canonicalOperator } from "@/src/config/operatorMap";
+import { ensureTriageSchema } from "@/src/lib/ensureTriageSchema";
 import { getCurrentClassification } from "@/src/services/classification";
 import { getCurrentRoutingRecommendation } from "@/src/services/routingRecommendations";
 import type {
@@ -41,6 +42,10 @@ export async function createTriageItemFromContext(
   const status = options.slackAction === "posted" ? "new" : "manual_review";
   const rr = ctx.routingRecommendation;
 
+  // Make sure the thread column exists before we write to it (self-heals if
+  // migration 008 has not been applied yet).
+  await ensureTriageSchema();
+
   const item = await triageRepo.insert({
     inboundEmailId: ctx.email.id,
     classificationId: ctx.classification.id,
@@ -58,6 +63,7 @@ export async function createTriageItemFromContext(
     recommendedNextStep: ctx.classification.recommended_next_step,
     slackMessageTs: options.slackMessageTs ?? null,
     slackChannel: options.slackChannel ?? null,
+    gmailThreadId: ctx.email.gmail_thread_id,
   });
 
   console.log(

@@ -300,6 +300,9 @@ export interface TriageItem {
   archived_reason: string | null;
   restored_at: Date | null;
   restored_by: string | null;
+  // Migration 008 — one case per Gmail thread.
+  gmail_thread_id: string | null;
+  superseded_by_triage_item_id: string | null;
 }
 
 export type ErrorStage =
