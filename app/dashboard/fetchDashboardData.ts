@@ -1,4 +1,5 @@
 import { query } from "@/src/lib/db";
+import { ensureTriageSchema } from "@/src/lib/ensureTriageSchema";
 import type { TriageItem } from "@/src/types/database";
 import type { SerializedTriageItem } from "./types";
 
@@ -48,6 +49,7 @@ function serialize(row: ExtendedRow): SerializedTriageItem {
     primary_category: row.primary_category,
     urgency_reason: row.urgency_reason,
     recommended_owner: row.recommended_owner,
+    gmail_thread_id: row.gmail_thread_id,
     has_unread_update: false,
   };
 }
@@ -74,6 +76,10 @@ export async function fetchAllItemsForOperator(
 ): Promise<SerializedTriageItem[]> {
   console.log(`[dashboard] DB fetch started operatorId=${operatorId ?? "none"}`);
 
+  // Self-heal the thread/ownership columns so the superseded filter never 500s
+  // if migration 008 has not been applied yet.
+  await ensureTriageSchema();
+
   if (operatorId) {
     const rows = await query<ExtendedRowWithRead>(
       `SELECT ti.*,
@@ -89,6 +95,7 @@ export async function fetchAllItemsForOperator(
        LEFT JOIN triage_item_operator_reads tior
               ON tior.triage_item_id = ti.id
               AND tior.operator_profile_id = $1::uuid
+       WHERE ti.superseded_by_triage_item_id IS NULL
        ${OPERATOR_ORDER}
        LIMIT 500`,
       [operatorId]
@@ -104,6 +111,7 @@ export async function fetchAllItemsForOperator(
             ec.recommended_owner
      FROM triage_items ti
      LEFT JOIN email_classifications ec ON ec.id = ti.classification_id
+     WHERE ti.superseded_by_triage_item_id IS NULL
      ${BASE_ORDER}
      LIMIT 500`,
     []

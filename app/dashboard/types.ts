@@ -31,21 +31,34 @@ export interface SerializedTriageItem {
   primary_category: string | null;
   urgency_reason: string | null;
   recommended_owner: string | null;
+  // Migration 008 — Gmail thread id mirrored onto the case.
+  gmail_thread_id: string | null;
   // Per-operator read state: true when updated_at > operator's last_viewed_at
   has_unread_update: boolean;
 }
 
 export interface TabCounts {
   all: number;
+  my_queue: number;
+  unassigned: number;
   urgent_open: number;
+  escalated: number;
   assigned: number;
   manual_review: number;
   operations: number;
   engineering: number;
   customer_success: number;
   field_ops: number;
+  sla_breached: number;
   resolved: number;
   archived: number;
+}
+
+// Minimal operator identity passed to the client for "My Queue" / "Assign to me".
+export interface CurrentOperator {
+  id: string;
+  username: string;
+  displayName: string | null;
 }
 
 export type DashboardView = "queue" | "agent";

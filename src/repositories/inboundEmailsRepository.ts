@@ -135,6 +135,16 @@ export async function findByThreadId(gmailThreadId: string): Promise<InboundEmai
   );
 }
 
+// Count emails in a given processing_status — used by the health panel to show
+// the classification backlog and any failed classifications.
+export async function countByProcessingStatus(status: ProcessingStatus): Promise<number> {
+  const row = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM inbound_emails WHERE processing_status = $1`,
+    [status]
+  );
+  return Number(row?.count ?? 0);
+}
+
 export async function findAwaitingClassification(limit = 50): Promise<InboundEmail[]> {
   return query<InboundEmail>(
     `SELECT * FROM inbound_emails

@@ -54,3 +54,49 @@ export async function findByEmailId(
     [inboundEmailId, limit]
   );
 }
+
+// Audit rows for a set of emails (a whole Gmail thread), oldest first —
+// the natural order for a case activity timeline.
+export async function findByEmailIdsAsc(
+  inboundEmailIds: string[],
+  limit = 500
+): Promise<AgentAuditLog[]> {
+  if (inboundEmailIds.length === 0) return [];
+  return query<AgentAuditLog>(
+    `SELECT * FROM agent_audit_logs
+     WHERE inbound_email_id = ANY($1::uuid[])
+     ORDER BY created_at ASC
+     LIMIT $2`,
+    [inboundEmailIds, limit]
+  );
+}
+
+// Most recent audit row matching any of the given event types — used by the
+// health panel to find e.g. the last successful Slack delivery.
+export async function findLatestByEventTypes(
+  eventTypes: string[]
+): Promise<AgentAuditLog | null> {
+  if (eventTypes.length === 0) return null;
+  return queryOne<AgentAuditLog>(
+    `SELECT * FROM agent_audit_logs
+     WHERE event_type = ANY($1::text[])
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [eventTypes]
+  );
+}
+
+// Count audit rows matching any of the given event types since a cutoff.
+export async function countByEventTypesSince(
+  eventTypes: string[],
+  since: Date
+): Promise<number> {
+  if (eventTypes.length === 0) return 0;
+  const row = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM agent_audit_logs
+     WHERE event_type = ANY($1::text[])
+       AND created_at >= $2`,
+    [eventTypes, since]
+  );
+  return Number(row?.count ?? 0);
+}
