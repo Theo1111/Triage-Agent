@@ -10,6 +10,7 @@ import { resolveOwner, type OperatorLite } from "@/src/lib/ownerDisplay";
 import { TEAM_LABELS } from "@/src/config/roles";
 import AssignMenu from "./AssignMenu";
 import CaseTimelineView from "./CaseTimelineView";
+import CorrectClassification from "./CorrectClassification";
 
 interface Props {
   item: SerializedTriageItem | null;
@@ -254,6 +255,9 @@ export default function DetailDrawer({ item, operators, onClose, onItemUpdated }
             </DrawerField>
           )}
         </div>
+
+        {/* Operator classification correction (AI vs human-corrected) */}
+        <CorrectClassification triageItemId={item.id} />
 
         {/* Activity timeline + thread messages */}
         <CaseTimelineView triageItemId={item.id} />

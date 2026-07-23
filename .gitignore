@@ -9,6 +9,9 @@
 
 # testing
 /coverage
+/eval-results
+/eval-candidates
+/.vitest
 
 # next.js
 /.next/

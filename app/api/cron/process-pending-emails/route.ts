@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { runAutoTriagePipeline } from "@/src/services/autoTriagePipeline";
 import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
 import { env } from "@/src/config/env";
+import { verifyBearerSecret } from "@/src/lib/secrets";
+import { logger } from "@/src/lib/log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -23,17 +25,17 @@ export const maxDuration = 300;
 //     "https://<host>/api/cron/process-pending-emails?limit=25"
 
 export async function GET(req: NextRequest) {
-  const cronSecret = env.CRON_SECRET;
-
-  if (cronSecret) {
-    const authHeader = req.headers.get("authorization") ?? "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (token !== cronSecret) {
-      console.warn("[cron/process-pending-emails] Unauthorized request — bad or missing CRON_SECRET");
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  } else {
-    console.warn("[cron/process-pending-emails] CRON_SECRET not set — allowing unauthenticated request (dev only)");
+  // Fail closed: in production an unset CRON_SECRET is a config error (500),
+  // not a silent allow. Constant-time comparison prevents timing leaks.
+  const auth = verifyBearerSecret(req.headers.get("authorization"), env.CRON_SECRET, {
+    name: "CRON_SECRET",
+  });
+  if (!auth.ok) {
+    logger.warn("cron.auth_failed", { stage: "process-pending-emails", outcome: String(auth.status) });
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+  if (auth.error) {
+    logger.warn("cron.auth_dev_bypass", { stage: "process-pending-emails" });
   }
 
   const limitParam = Number(req.nextUrl.searchParams.get("limit"));

@@ -1,8 +1,9 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/src/config/env";
 import * as inboundEmailsRepo from "@/src/repositories/inboundEmailsRepository";
 import { runAutoTriagePipeline } from "@/src/services/autoTriagePipeline";
+import { verifyBearerSecret } from "@/src/lib/secrets";
+import { logger, summarizeError } from "@/src/lib/log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -11,14 +12,6 @@ type HeartbeatBody = {
   runId?: unknown;
   limit?: unknown;
 };
-
-function authenticated(req: NextRequest, secret: string): boolean {
-  const header = req.headers.get("authorization") ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  const tokenHash = createHash("sha256").update(token).digest();
-  const secretHash = createHash("sha256").update(secret).digest();
-  return timingSafeEqual(tokenHash, secretHash);
-}
 
 async function parseBody(req: NextRequest): Promise<HeartbeatBody> {
   try {
@@ -37,10 +30,16 @@ function parseLimit(value: unknown): number {
 }
 
 export async function POST(req: NextRequest) {
-  const secret = env.PAPERCLIP_HEARTBEAT_SECRET;
-  if (!secret || !authenticated(req, secret)) {
-    console.warn("[paperclip/heartbeat] Unauthorized request");
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Fail closed: unset PAPERCLIP_HEARTBEAT_SECRET in production is a config
+  // error (500); constant-time comparison; 401 on a bad/missing token.
+  const auth = verifyBearerSecret(
+    req.headers.get("authorization"),
+    env.PAPERCLIP_HEARTBEAT_SECRET,
+    { name: "PAPERCLIP_HEARTBEAT_SECRET" }
+  );
+  if (!auth.ok) {
+    logger.warn("paperclip.heartbeat.auth_failed", { outcome: String(auth.status) });
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
   const body = await parseBody(req);
@@ -109,9 +108,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    console.log(
-      `[paperclip/heartbeat] done found=${pending.length} processed=${processed} failed=${failed}`
-    );
+    logger.info("paperclip.heartbeat.done", {
+      paperclipRunId,
+      stage: "heartbeat",
+      outcome: failed === 0 ? "ok" : "partial",
+      found: pending.length,
+      processed,
+      failed,
+    });
 
     return NextResponse.json({
       ok: true,
@@ -122,7 +126,12 @@ export async function POST(req: NextRequest) {
       results,
     });
   } catch (err) {
-    console.error("[paperclip/heartbeat] Unhandled invocation failure:", err);
+    logger.error("paperclip.heartbeat.failed", {
+      paperclipRunId,
+      stage: "heartbeat",
+      outcome: "error",
+      error: summarizeError(err),
+    });
     return NextResponse.json(
       { ok: false, error: "Heartbeat invocation failed" },
       { status: 500 }

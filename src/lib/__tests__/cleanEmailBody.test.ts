@@ -3,7 +3,7 @@
 // Run with: npx tsx --test src/lib/__tests__/cleanEmailBody.test.ts
 // (requires: npm install -D tsx)
 
-import { test, describe } from "node:test";
+import { test, describe } from "vitest";
 import assert from "node:assert/strict";
 import { cleanEmailBodyForTriage } from "../cleanEmailBody";
 

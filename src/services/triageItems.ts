@@ -46,7 +46,7 @@ export async function createTriageItemFromContext(
   // migration 008 has not been applied yet).
   await ensureTriageSchema();
 
-  const item = await triageRepo.insert({
+  const insertInput: triageRepo.InsertTriageItemInput = {
     inboundEmailId: ctx.email.id,
     classificationId: ctx.classification.id,
     routingRecommendationId: rr?.id ?? null,
@@ -64,7 +64,26 @@ export async function createTriageItemFromContext(
     slackMessageTs: options.slackMessageTs ?? null,
     slackChannel: options.slackChannel ?? null,
     gmailThreadId: ctx.email.gmail_thread_id,
-  });
+  };
+
+  let item: TriageItem;
+  try {
+    item = await triageRepo.insert(insertInput);
+  } catch (err) {
+    // Concurrency guard (migration 009): a second message from the same thread
+    // racing to create a canonical case hits the partial unique index. Instead
+    // of failing, link to the case that won the race — one case per thread.
+    if (isUniqueViolation(err) && ctx.email.gmail_thread_id) {
+      const existing = await triageRepo.findActiveByThreadId(ctx.email.gmail_thread_id);
+      if (existing) {
+        console.log(
+          `[triage] create race resolved — linked email=${ctx.email.id} to existing case=${existing.id}`
+        );
+        return existing;
+      }
+    }
+    throw err;
+  }
 
   console.log(
     `[triage] created item=${item.id} email=${ctx.email.id} ` +
@@ -72,6 +91,11 @@ export async function createTriageItemFromContext(
   );
 
   return item;
+}
+
+// Postgres unique_violation SQLSTATE.
+export function isUniqueViolation(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: string }).code === "23505";
 }
 
 // Convenience wrapper: fetches all required data then calls createTriageItemFromContext.

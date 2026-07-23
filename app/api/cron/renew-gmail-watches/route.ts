@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { renewWatchesDueSoon } from "@/src/services/gmailWatch";
 import { env } from "@/src/config/env";
+import { verifyBearerSecret } from "@/src/lib/secrets";
+import { logger } from "@/src/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -14,17 +16,16 @@ export const dynamic = "force-dynamic";
 // Skips inboxes with oauth_invalid status — they need manual OAuth reconnect.
 
 export async function GET(req: NextRequest) {
-  const cronSecret = env.CRON_SECRET;
-
-  if (cronSecret) {
-    const authHeader = req.headers.get("authorization") ?? "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (token !== cronSecret) {
-      console.warn("[cron/renew-gmail-watches] Unauthorized request — bad or missing CRON_SECRET");
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  } else {
-    console.warn("[cron/renew-gmail-watches] CRON_SECRET not set — allowing unauthenticated request (dev only)");
+  // Fail closed: unset CRON_SECRET in production is a config error (500).
+  const auth = verifyBearerSecret(req.headers.get("authorization"), env.CRON_SECRET, {
+    name: "CRON_SECRET",
+  });
+  if (!auth.ok) {
+    logger.warn("cron.auth_failed", { stage: "renew-gmail-watches", outcome: String(auth.status) });
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+  if (auth.error) {
+    logger.warn("cron.auth_dev_bypass", { stage: "renew-gmail-watches" });
   }
 
   try {

@@ -1,7 +1,7 @@
 // Tests for owner resolution + SLA logic.
 // Run with: npx tsx --test src/lib/__tests__/ownerDisplay.test.ts
 
-import { test, describe } from "node:test";
+import { test, describe } from "vitest";
 import assert from "node:assert/strict";
 import { resolveOwner, findOperatorForOwner } from "../ownerDisplay";
 import { isSlaBreached, slaDeadlineMs } from "@/src/config/sla";

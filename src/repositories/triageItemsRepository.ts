@@ -100,6 +100,22 @@ export async function countByStatus(status: TriageStatus): Promise<number> {
   return Number(row?.count ?? 0);
 }
 
+// The single active (non-closed, non-superseded) triage case for a Gmail thread,
+// matching the partial unique index from migration 009. Used to resolve a
+// concurrent-create race: the insert that loses the unique constraint links to
+// the winner instead of failing.
+export async function findActiveByThreadId(gmailThreadId: string): Promise<TriageItem | null> {
+  return queryOne<TriageItem>(
+    `SELECT * FROM triage_items
+     WHERE gmail_thread_id = $1
+       AND superseded_by_triage_item_id IS NULL
+       AND status NOT IN ('resolved', 'archived', 'ignored')
+     ORDER BY created_at ASC
+     LIMIT 1`,
+    [gmailThreadId]
+  );
+}
+
 export async function findOpen(limit = 50): Promise<TriageItem[]> {
   return query<TriageItem>(
     `SELECT * FROM triage_items
@@ -281,6 +297,48 @@ export async function updateFields(
   const row = await queryOne<TriageItem>(
     `UPDATE triage_items SET ${setClauses.join(", ")} WHERE id = $1 RETURNING *`,
     values
+  );
+  if (!row) throw new Error(`Triage item not found: ${id}`);
+  return row;
+}
+
+// Refresh the denormalized classification snapshot on a triage item after a
+// reclassification. Does NOT change lifecycle status/timestamps or create a new
+// case — updates the existing canonical case in place.
+export async function updateClassificationSnapshot(
+  id: string,
+  fields: {
+    classificationId?: string | null;
+    urgencyLevel: string;
+    sensitivityLevel: string;
+    routeType: string;
+    owner: string | null;
+    summary: string | null;
+    recommendedNextStep: string | null;
+  }
+): Promise<TriageItem> {
+  const row = await queryOne<TriageItem>(
+    `UPDATE triage_items
+     SET classification_id     = COALESCE($2, classification_id),
+         urgency_level         = $3,
+         sensitivity_level     = $4,
+         route_type            = $5,
+         owner                 = $6,
+         summary               = $7,
+         recommended_next_step = $8,
+         updated_at            = now()
+     WHERE id = $1
+     RETURNING *`,
+    [
+      id,
+      fields.classificationId ?? null,
+      fields.urgencyLevel,
+      fields.sensitivityLevel,
+      fields.routeType,
+      fields.owner,
+      fields.summary,
+      fields.recommendedNextStep,
+    ]
   );
   if (!row) throw new Error(`Triage item not found: ${id}`);
   return row;
